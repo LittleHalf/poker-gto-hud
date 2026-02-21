@@ -11,3 +11,4 @@ coverage/
 
 # mcp-use deployment
 .mcp-use
+.env
