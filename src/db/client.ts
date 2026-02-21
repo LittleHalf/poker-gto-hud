@@ -1,12 +1,8 @@
-// Uses the built-in node:sqlite module (Node >= 22.5, stable in Node 25+)
-// No native compilation required.
+// Built-in SQLite — Node 22.5+ (stable in Node 25). No native compilation needed.
 import { DatabaseSync } from 'node:sqlite'
-import { join, dirname } from 'path'
-import { fileURLToPath } from 'url'
+import { join } from 'path'
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
-
-const dbPath = process.env.DB_CONNECTION_STRING ?? join(__dirname, '../../poker.db')
+const dbPath = process.env.DB_CONNECTION_STRING ?? join(process.cwd(), 'poker.db')
 
 export const db = new DatabaseSync(dbPath)
 
@@ -69,23 +65,34 @@ db.exec(`
     timestamp  INTEGER NOT NULL,
     payload    TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS chat_history (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT,
+    role       TEXT NOT NULL,
+    content    TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
 `)
 
-// ── Typed wrappers so callers keep the same API as better-sqlite3 ──────────
+// ── Safe wrappers — node:sqlite uses SupportedValueType; cast via any ───────
 
 type RowRecord = Record<string, unknown>
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type P = any[]
 
-export function dbGet<T = RowRecord>(sql: string, ...params: unknown[]): T | null {
-  const stmt = db.prepare(sql)
-  const row = stmt.get(...params)
+export function dbGet<T = RowRecord>(sql: string, ...params: P): T | null {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const row = (db.prepare(sql) as any).get(...params)
   return (row as T) ?? null
 }
 
-export function dbAll<T = RowRecord>(sql: string, ...params: unknown[]): T[] {
-  const stmt = db.prepare(sql)
-  return stmt.all(...params) as T[]
+export function dbAll<T = RowRecord>(sql: string, ...params: P): T[] {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (db.prepare(sql) as any).all(...params) as T[]
 }
 
-export function dbRun(sql: string, ...params: unknown[]): void {
-  db.prepare(sql).run(...params)
+export function dbRun(sql: string, ...params: P): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ;(db.prepare(sql) as any).run(...params)
 }

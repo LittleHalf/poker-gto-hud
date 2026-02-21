@@ -1,0 +1,51 @@
+{
+  "preflop": {
+    "opening_ranges": {
+      "UTG": ["AAs", "KKs", "QQs", "JJs", "TTs", "AKs", "AKo", "AQs"],
+      "MP":  ["AAs", "KKs", "QQs", "JJs", "TTs", "AKs", "AKo", "AQs", "99s", "88s", "AJs", "KQs"],
+      "HJ":  ["AAs", "KKs", "QQs", "JJs", "TTs", "AKs", "AKo", "AQs", "99s", "88s", "77s", "AJs", "AJo", "ATs", "KQs", "KQo", "QJs"],
+      "CO":  ["AAs", "KKs", "QQs", "JJs", "TTs", "AKs", "AKo", "AQs", "99s", "88s", "77s", "66s", "AJs", "AJo", "ATs", "A9s", "KQs", "KQo", "KJs", "QJs", "JTs", "T9s"],
+      "BTN": ["AAs", "KKs", "QQs", "JJs", "TTs", "AKs", "AKo", "AQs", "99s", "88s", "77s", "66s", "55s", "44s", "33s", "22s", "AJs", "AJo", "ATs", "A9s", "A8s", "A7s", "KQs", "KQo", "KJs", "KTs", "QJs", "QTs", "JTs", "J9s", "T9s", "98s"],
+      "SB":  ["AAs", "KKs", "QQs", "JJs", "TTs", "AKs", "AKo", "AQs", "99s", "88s", "77s", "66s", "55s", "AJs", "AJo", "ATs", "A9s", "KQs", "KQo", "KJs", "QJs", "JTs", "T9s"],
+      "BB":  []
+    },
+    "threebet_ranges": {
+      "UTG": ["AAs", "KKs", "QQs", "AKs", "AKo"],
+      "MP":  ["AAs", "KKs", "QQs", "AKs", "AKo"],
+      "HJ":  ["AAs", "KKs", "QQs", "JJs", "AKs", "AKo"],
+      "CO":  ["AAs", "KKs", "QQs", "JJs", "TTs", "AKs", "AKo", "AQs"],
+      "BTN": ["AAs", "KKs", "QQs", "JJs", "TTs", "AKs", "AKo", "AQs", "AQo", "KQs", "A5s", "A4s"],
+      "SB":  ["AAs", "KKs", "QQs", "JJs", "TTs", "AKs", "AKo", "AQs", "A5s"],
+      "BB":  ["AAs", "KKs", "QQs", "JJs", "TTs", "AKs", "AKo"]
+    },
+    "calling_ranges": {
+      "UTG": ["99s", "88s"],
+      "MP":  ["99s", "88s", "77s", "AQo"],
+      "HJ":  ["99s", "88s", "77s", "AQo", "AJs"],
+      "CO":  ["99s", "88s", "77s", "66s", "AQo", "AJs", "KQs", "KQo"],
+      "BTN": ["99s", "88s", "77s", "66s", "55s", "44s", "33s", "22s", "AQo", "AJs", "KQs", "KQo", "KJs"],
+      "SB":  ["99s", "88s", "77s", "66s", "AQo", "AJs", "KQs"],
+      "BB":  ["99s", "88s", "77s", "66s", "55s", "44s", "AQo", "AJs", "KQs", "KQo"]
+    }
+  },
+  "postflop": {
+    "cbet_frequency": {
+      "dry": 0.65,
+      "rainbow": 0.55,
+      "two-tone": 0.45,
+      "monotone": 0.30
+    },
+    "check_raise_frequency": {
+      "dry": 0.12,
+      "rainbow": 0.18,
+      "two-tone": 0.22,
+      "monotone": 0.18
+    },
+    "fold_frequency": {
+      "dry": 0.35,
+      "rainbow": 0.40,
+      "two-tone": 0.45,
+      "monotone": 0.52
+    }
+  }
+}

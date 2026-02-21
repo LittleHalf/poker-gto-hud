@@ -1,0 +1,151 @@
+/**
+ * hand_chat — Live LLM Q&A about the current hand.
+ *
+ * The hero can ask anything: "what if I raise bigger?", "why should I fold here?",
+ * "how is this villain playing?", "should I deviate from the recommendation?".
+ * Claude receives full game context (cards, board, pot, villain stats + tags,
+ * current recommendation) and answers conversationally.
+ */
+
+import Anthropic from '@anthropic-ai/sdk'
+import { dbGet, dbAll, dbRun } from '../db/client.js'
+import { getStats } from '../db/stats.js'
+import { computeTag } from '../engine/stats.js'
+import type { GameState } from './adviser.js'
+
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface ChatContext {
+  game_state?: Partial<GameState>
+  current_recommendation?: string
+  lambda?: number
+  session_id?: string
+}
+
+export interface ChatResult {
+  answer: string
+  follow_up_suggestions: string[]
+}
+
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+
+export async function handChat(
+  question: string,
+  context: ChatContext,
+  history: ChatMessage[] = []
+): Promise<ChatResult> {
+  const systemPrompt = buildSystemPrompt(context)
+
+  const messages: Anthropic.MessageParam[] = [
+    ...history.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+    { role: 'user', content: question },
+  ]
+
+  const resp = await client.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 400,
+    system: systemPrompt,
+    messages,
+  })
+
+  const answer = resp.content[0].type === 'text' ? resp.content[0].text : ''
+
+  // Generate 2–3 short follow-up suggestion chips
+  const suggestions = generateFollowUps(question, context)
+
+  // Persist to chat history
+  if (context.session_id) {
+    dbRun(
+      'INSERT INTO chat_history (session_id, role, content) VALUES (?, ?, ?)',
+      context.session_id, 'user', question
+    )
+    dbRun(
+      'INSERT INTO chat_history (session_id, role, content) VALUES (?, ?, ?)',
+      context.session_id, 'assistant', answer
+    )
+  }
+
+  return { answer, follow_up_suggestions: suggestions }
+}
+
+function buildSystemPrompt(ctx: ChatContext): string {
+  const gs = ctx.game_state
+  const lambda = ctx.lambda ?? 0.5
+  const strategy = lambda < 0.2 ? 'GTO' : lambda > 0.8 ? 'Exploit' : 'Balanced GTO/Exploit'
+
+  let villainContext = ''
+  if (gs?.villains && gs.villains.length > 0) {
+    villainContext = gs.villains.map(v => {
+      const stats = getStats(v.player_id)
+      if (!stats) return `${v.position}: ${v.player_id} (no data)`
+      const tag = computeTag(stats)
+      const vpip = stats.vpip_denom > 0 ? (stats.vpip_num / stats.vpip_denom * 100).toFixed(0) + '%' : 'N/A'
+      const pfr  = stats.pfr_denom  > 0 ? (stats.pfr_num  / stats.pfr_denom  * 100).toFixed(0) + '%' : 'N/A'
+      const af   = stats.af_calls   > 0 ? (stats.af_bets  / stats.af_calls).toFixed(2)                : 'N/A'
+      const f3b  = stats.fold_to_3bet_denom > 0
+        ? (stats.fold_to_3bet_num / stats.fold_to_3bet_denom * 100).toFixed(0) + '%' : 'N/A'
+      const fcb  = stats.cbet_fold_denom > 0
+        ? (stats.cbet_fold_num / stats.cbet_fold_denom * 100).toFixed(0) + '%' : 'N/A'
+      const n = stats.vpip_denom
+      return `  - ${v.position} [${tag}] (${n} hands): VPIP=${vpip}, PFR=${pfr}, AF=${af}, Fold→3bet=${f3b}, Fold→Cbet=${fcb}, Stack=${v.stack_bb}bb`
+    }).join('\n')
+  }
+
+  return `You are an expert poker coach giving real-time advice during a live hand. Be concise and direct — the hero is mid-hand.
+
+## Current Hand State
+- Street: ${gs?.street ?? 'unknown'}
+- Hero position: ${gs?.hero_position ?? 'unknown'}
+- Hero cards: ${gs?.hero_cards?.join(' ') ?? 'unknown'}
+- Board: ${gs?.board?.length ? gs.board.join(' ') : '(none)'}
+- Pot: ${gs?.pot_bb?.toFixed(1) ?? '?'}bb
+- To call: ${gs?.to_call_bb?.toFixed(1) ?? '0'}bb
+- Hero stack: ${gs?.stack_bb?.toFixed(0) ?? '?'}bb
+- Action history this street: ${gs?.action_history?.join(' → ') ?? 'none'}
+
+## Villain Stats
+${villainContext || '  (no villain data)'}
+
+## Current Recommendation
+${ctx.current_recommendation ?? 'none yet'}
+
+## Strategy Mode
+λ = ${lambda.toFixed(2)} (${strategy}) — hero's current GTO vs Exploit dial.
+
+## Instructions
+- Answer the hero's question directly. Reference specific villain stats when relevant.
+- If asked about sizing deviations, explain EV impact using the villain's fold/call tendencies.
+- If asked "what if I raise more/less", give concrete EV intuition (e.g. "vs a player folding 70% to 3-bets, larger sizing captures more dead money").
+- When you recommend deviating from the GTO baseline, explain why this villain's stats justify it.
+- Keep responses under 120 words. Be direct. Skip pleasantries.`
+}
+
+function generateFollowUps(question: string, ctx: ChatContext): string[] {
+  const q = question.toLowerCase()
+  const gs = ctx.game_state
+
+  const all = [
+    'Why is this better than folding?',
+    'What sizing maximizes EV here?',
+    `How is the ${gs?.villains?.[0]?.position ?? 'villain'} playing today?`,
+    'What if I raise bigger?',
+    'What if villain re-raises?',
+    'Should I slow-play instead?',
+    'What are my pot odds?',
+    'What\'s my equity vs their range?',
+    'When should I deviate from GTO here?',
+  ]
+
+  // Pick 3 suggestions that don't overlap with the question
+  return all.filter(s => !q.includes(s.toLowerCase().slice(0, 10))).slice(0, 3)
+}
+
+export function getChatHistory(session_id: string, limit = 20): ChatMessage[] {
+  return dbAll<{ role: string; content: string }>(
+    'SELECT role, content FROM chat_history WHERE session_id = ? ORDER BY created_at DESC LIMIT ?',
+    session_id, limit
+  ).reverse().map(r => ({ role: r.role as 'user' | 'assistant', content: r.content }))
+}

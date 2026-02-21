@@ -1,11 +1,12 @@
 {
   "mcpServers": {
-    "poker-live-mcp": {
+    "poker-gto-hud": {
       "command": "node",
-      "args": ["packages/mcp-server/dist/index.js"],
+      "args": ["dist/index.js"],
       "env": {
         "DB_CONNECTION_STRING": "poker.db",
-        "ANTHROPIC_API_KEY": ""
+        "ANTHROPIC_API_KEY": "",
+        "MCP_URL": "http://localhost:3000"
       }
     }
   }
