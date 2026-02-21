@@ -176,6 +176,31 @@ server.tool(
   }
 )
 
+// ── REST endpoints for Chrome extension ──────────────────────────────────────
+
+// Allow requests from Chrome extensions and any origin
+server.app.use('*', async (c, next) => {
+  await next()
+  c.res.headers.set('Access-Control-Allow-Origin', '*')
+  c.res.headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS')
+  c.res.headers.set('Access-Control-Allow-Headers', 'Content-Type')
+})
+
+server.app.options('/monitor', (c) => c.text('', 204))
+server.app.options('/ingest', (c) => c.text('', 204))
+
+server.app.post('/monitor', async (c) => {
+  const { source_url } = await c.req.json<{ source_url: string }>()
+  const result = await monitorStart(source_url)
+  return c.json(result)
+})
+
+server.app.post('/ingest', async (c) => {
+  const { event, session_id } = await c.req.json<{ event: Parameters<typeof handIngest>[0]; session_id: string }>()
+  const state = await handIngest(event, session_id)
+  return c.json(JSON.parse(JSON.stringify(state)))
+})
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 
 server.listen().then(() => {

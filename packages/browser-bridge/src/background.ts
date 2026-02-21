@@ -13,7 +13,7 @@ interface StoredSession {
   mcp_server_url: string
 }
 
-const DEFAULT_MCP_URL = 'http://localhost:3000'
+const DEFAULT_MCP_URL = 'https://gentle-grass-l9c8r.run.mcp-use.com'
 
 // ── Storage helpers ──────────────────────────────────────────────────────────
 

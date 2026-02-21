@@ -6,10 +6,12 @@
   "permissions": [
     "activeTab",
     "storage",
-    "scripting"
+    "scripting",
+    "tabs"
   ],
   "host_permissions": [
     "https://www.pokernow.club/*",
+    "https://gentle-grass-l9c8r.run.mcp-use.com/*",
     "http://localhost:*/*"
   ],
   "background": {
@@ -25,9 +27,5 @@
   ],
   "action": {
     "default_title": "Poker GTO HUD"
-  },
-  "icons": {
-    "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
   }
 }

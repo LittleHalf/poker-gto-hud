@@ -4,7 +4,7 @@
 type GameEventType = 'CARD_DEAL' | 'ACTION' | 'PLAYER_JOIN' | 'HAND_START' | 'SHOWDOWN' | 'POT_WIN'
 
 interface GameEvent {
-  type: GameEventType
+  type: string
   timestamp: number
   payload: Record<string, unknown>
 }
