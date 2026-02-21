@@ -208,8 +208,8 @@ server.app.post('/ingest', async (c) => {
 })
 
 server.app.post('/decide', async (c) => {
-  const { game_state, lambda = 0.5 } = await c.req.json<{ game_state: Parameters<typeof adviserGetDecision>[0]; lambda?: number }>()
-  const decision = await adviserGetDecision(game_state, lambda)
+  const { game_state, lambda = 0.5, screenshot } = await c.req.json<{ game_state: Parameters<typeof adviserGetDecision>[0]; lambda?: number; screenshot?: string }>()
+  const decision = await adviserGetDecision(game_state, lambda, screenshot)
   return c.json(JSON.parse(JSON.stringify(decision)))
 })
 

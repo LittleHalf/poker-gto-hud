@@ -61,17 +61,31 @@ async function forwardEvent(event: GameEvent): Promise<void> {
 
 // ── Decision request ─────────────────────────────────────────────────────────
 
+async function captureScreenshot(tabId: number): Promise<string | undefined> {
+  try {
+    const tab = await chrome.tabs.get(tabId)
+    if (!tab.windowId) return undefined
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 55 })
+    return dataUrl
+  } catch {
+    return undefined
+  }
+}
+
 async function requestDecision(game_state: GameState, tabId: number): Promise<void> {
   const session = await getSession()
   if (!session) return
 
   const lambda = await getLambda()
 
+  // Capture screenshot so Claude can see the cards visually
+  const screenshot = await captureScreenshot(tabId)
+
   try {
     const resp = await fetch(`${session.mcp_server_url}/decide`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ game_state, lambda }),
+      body: JSON.stringify({ game_state, lambda, screenshot }),
     })
 
     if (!resp.ok) {

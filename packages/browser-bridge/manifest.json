@@ -11,6 +11,7 @@
   ],
   "host_permissions": [
     "https://www.pokernow.com/*",
+    "https://pokernow.com/*",
     "https://gentle-grass-l9c8r.run.mcp-use.com/*",
     "http://localhost:*/*"
   ],
@@ -20,7 +21,7 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.pokernow.com/*"],
+      "matches": ["https://www.pokernow.com/*", "https://pokernow.com/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
     }

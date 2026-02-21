@@ -110,16 +110,19 @@ function getPostflopGtoAction(state: GameState): GtoResult {
 
 function normalizePosition(pos: string | null): string {
   if (!pos) return 'BTN'
+  // Strip trailing seat index like "BTN_0", "SEAT_3"
+  const cleaned = pos.toLowerCase().replace(/_\d+$/, '').replace(/^seat\d*$/, 'btn').trim()
   const map: Record<string, string> = {
-    'button': 'BTN', 'btn': 'BTN',
+    'button': 'BTN', 'btn': 'BTN', 'd': 'BTN', 'dealer': 'BTN',
     'cutoff': 'CO', 'co': 'CO',
     'hijack': 'HJ', 'hj': 'HJ',
-    'sb': 'SB', 'small blind': 'SB',
-    'bb': 'BB', 'big blind': 'BB',
+    'sb': 'SB', 'small blind': 'SB', 'small_blind': 'SB',
+    'bb': 'BB', 'big blind': 'BB', 'big_blind': 'BB',
     'utg': 'UTG', 'under the gun': 'UTG',
     'mp': 'MP', 'middle position': 'MP',
+    'unknown': 'BTN',  // treat unknown as BTN (widest range)
   }
-  return map[pos.toLowerCase()] ?? pos.toUpperCase()
+  return map[cleaned] ?? cleaned.toUpperCase()
 }
 
 function canonicalHand(cards: string[]): string {
@@ -162,40 +165,44 @@ function estimateHandStrength(heroCards: string[], board: string[]): number {
 }
 
 function getDefaultCharts(): GtoCharts {
-  const premiums = ['AAs', 'KKs', 'QQs', 'JJs', 'TTs', 'AKs', 'AKo', 'AQs']
-  const broadOpeners = ['99s', '88s', '77s', '66s', 'AJs', 'AJo', 'ATs', 'KQs', 'KQo', 'AQo', 'QJs', 'JTs']
-  const latePosition = ['55s', '44s', '33s', '22s', 'A9s', 'A8s', 'A7s', 'K9s', 'KTs', 'QTs', 'J9s', 'T9s']
-  const threebetHands = ['AAs', 'KKs', 'QQs', 'JJs', 'AKs', 'AKo']
-  const callHands = ['99s', '88s', '77s', '66s', 'AQo', 'AJs', 'KQs']
+  const premiums    = ['AAs', 'KKs', 'QQs', 'JJs', 'TTs', 'AKs', 'AKo', 'AQs']
+  const broadOpen   = ['99s', '88s', '77s', '66s', 'AJs', 'AJo', 'ATs', 'ATo', 'KQs', 'KQo', 'AQo', 'QJs', 'QJo', 'JTs']
+  const midOpen     = ['55s', '44s', '33s', '22s', 'A9s', 'A9o', 'A8s', 'A7s', 'A6s', 'A5s', 'A4s', 'A3s', 'A2s',
+                       'KJs', 'KJo', 'KTs', 'KTo', 'QTs', 'QTo', 'J9s', 'T9s', 'T8s', '98s', '97s', '87s', '76s']
+  const lateOpen    = ['K9s', 'K9o', 'Q9s', 'J8s', 'T7s', '96s', '86s', '75s', '65s', '64s', '54s', '53s',
+                       'K8s', 'K7s', 'K6s', 'K5s', 'K4s', 'Q8s', 'J7s', 'A5o', 'A4o', 'A3o', 'A2o']
+  const threebetHands = ['AAs', 'KKs', 'QQs', 'JJs', 'TTs', 'AKs', 'AKo', 'AQs', 'AQo', 'AJs', 'KQs']
+  const callHands   = ['99s', '88s', '77s', '66s', '55s', '44s', '33s', '22s',
+                       'AQo', 'AJs', 'AJo', 'ATs', 'KQs', 'KQo', 'KJs', 'QJs', 'JTs', 'T9s', '98s']
 
   return {
     preflop: {
       opening_ranges: {
-        UTG: premiums,
-        MP: [...premiums, ...broadOpeners.slice(0, 6)],
-        HJ: [...premiums, ...broadOpeners],
-        CO: [...premiums, ...broadOpeners, ...latePosition.slice(0, 8)],
-        BTN: [...premiums, ...broadOpeners, ...latePosition],
-        SB: [...premiums, ...broadOpeners, ...latePosition.slice(0, 10)],
-        BB: [],
+        UTG: [...premiums, ...broadOpen.slice(0, 8)],
+        MP:  [...premiums, ...broadOpen],
+        HJ:  [...premiums, ...broadOpen, ...midOpen.slice(0, 12)],
+        CO:  [...premiums, ...broadOpen, ...midOpen],
+        BTN: [...premiums, ...broadOpen, ...midOpen, ...lateOpen],
+        SB:  [...premiums, ...broadOpen, ...midOpen, ...lateOpen.slice(0, 15)],
+        BB:  [],  // BB defends to raises, not opening
       },
       threebet_ranges: {
-        UTG: threebetHands,
-        MP: threebetHands,
-        HJ: threebetHands,
-        CO: [...threebetHands, 'TTs', 'AQs'],
-        BTN: [...threebetHands, 'TTs', 'AQs', 'AQo', 'KQs'],
-        SB: [...threebetHands, 'TTs', 'AQs'],
-        BB: [...threebetHands, 'TTs'],
+        UTG: threebetHands.slice(0, 6),
+        MP:  threebetHands.slice(0, 8),
+        HJ:  threebetHands.slice(0, 9),
+        CO:  threebetHands,
+        BTN: [...threebetHands, 'A5s', 'A4s', 'A3s', 'A2s'],  // BTN polarised 3-bets
+        SB:  threebetHands,
+        BB:  [...threebetHands, 'A5s', 'A4s'],
       },
       calling_ranges: {
-        UTG: callHands.slice(0, 3),
-        MP: callHands.slice(0, 4),
-        HJ: callHands.slice(0, 5),
-        CO: callHands,
-        BTN: [...callHands, '55s', '44s', '33s', '22s'],
-        SB: callHands,
-        BB: [...callHands, '55s', '44s'],
+        UTG: callHands.slice(0, 5),
+        MP:  callHands.slice(0, 8),
+        HJ:  callHands.slice(0, 12),
+        CO:  callHands,
+        BTN: [...callHands, 'A9o', 'A8o', 'K9s', 'QTs', 'J9s', '87s', '76s'],
+        SB:  callHands,
+        BB:  [...callHands, 'A9o', 'A8o', 'K9s', 'Q9s', 'J9s', 'T8s', '97s', '86s', '75s'],
       },
     },
     postflop: {

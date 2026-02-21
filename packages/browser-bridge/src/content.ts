@@ -372,15 +372,24 @@ function extractGameState(): GameState | null {
   const heroStackEl = heroEl?.querySelector('.table-player-stack,.stack-value,[class*="chips"] [class*="value"],[class*="stack"] [class*="value"]')
   const stack_bb = parseStack(heroStackEl ?? null)
 
-  // Position
-  let hero_position = 'UNKNOWN'
-  const pos = heroEl?.getAttribute('data-position')
-  if (pos) {
-    hero_position = pos.toUpperCase()
+  // Position — try data attribute, then text label, then seat-index estimate
+  let hero_position = 'BTN'  // default to BTN (most playable range) when unknown
+  const posAttr = heroEl?.getAttribute('data-position')
+  if (posAttr && !/^\d+$/.test(posAttr)) {
+    hero_position = posAttr.toUpperCase()
   } else {
-    const seats = [...document.querySelectorAll('.table-player')]
-    const idx = seats.indexOf(heroEl as HTMLElement)
-    hero_position = ['BTN','SB','BB','UTG','MP','HJ','CO'][idx] ?? `SEAT_${idx}`
+    // Look for position text label inside or near the hero element
+    const posLabel = heroEl?.querySelector('[class*="position"],[class*="dealer"],[class*="blind"],[class*="role"]')
+    const labelText = posLabel?.textContent?.trim().toUpperCase()
+    if (labelText && ['BTN','SB','BB','UTG','MP','HJ','CO','D','BUTTON'].includes(labelText)) {
+      hero_position = labelText === 'D' || labelText === 'BUTTON' ? 'BTN' : labelText
+    } else {
+      // Seat-index heuristic: rotate through named positions
+      const seats = [...document.querySelectorAll('.table-player')]
+      const idx = seats.indexOf(heroEl as HTMLElement)
+      const posNames = ['BTN','SB','BB','UTG','MP','HJ','CO']
+      hero_position = posNames[idx % posNames.length] ?? 'BTN'
+    }
   }
 
   // Villains

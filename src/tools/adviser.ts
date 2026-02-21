@@ -30,7 +30,8 @@ export interface Decision {
 
 export async function adviserGetDecision(
   game_state: GameState,
-  lambda: number
+  lambda: number,
+  screenshot?: string   // base64 JPEG data URL from the browser tab
 ): Promise<Decision> {
   const primaryVillain = game_state.villains[0]
   const villainStats = primaryVillain ? await getStats(primaryVillain.player_id) : null
@@ -73,10 +74,26 @@ Respond with ONLY a raw JSON object — no markdown, no code fences:
 {"action":"FOLD|CHECK|CALL|BET|RAISE","sizing":"e.g. 2.5x or 67% pot (null if none)","reasoning":"one concise sentence explaining the key reason","confidence":0.0}`
 
   try {
+    // If we have a screenshot, send it to Claude Vision for visual card reading
+    const userContent: Anthropic.ContentBlockParam[] = []
+    if (screenshot) {
+      const base64 = screenshot.replace(/^data:image\/\w+;base64,/, '')
+      userContent.push({
+        type: 'image',
+        source: { type: 'base64', media_type: 'image/jpeg', data: base64 },
+      } as Anthropic.ImageBlockParam)
+      userContent.push({
+        type: 'text',
+        text: `This is a screenshot of the poker game. Use it to visually confirm the cards, board, and action buttons. Then: ${prompt}`,
+      } as Anthropic.TextBlockParam)
+    } else {
+      userContent.push({ type: 'text', text: prompt } as Anthropic.TextBlockParam)
+    }
+
     const resp = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 180,
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{ role: 'user', content: userContent }],
     })
 
     const text = resp.content[0].type === 'text' ? resp.content[0].text.trim() : ''
