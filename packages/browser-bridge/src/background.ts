@@ -162,7 +162,45 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     getSession().then(session => sendResponse({ session })).catch(console.error)
     return true
   }
+
+  if (message.type === 'CHAT_REQUEST') {
+    if (tabId) handleChat(message as ChatRequest, tabId).catch(console.error)
+    sendResponse({ ok: true })
+    return true
+  }
 })
+
+interface ChatRequest {
+  type: string
+  question: string
+  game_state?: GameState
+  current_recommendation?: string
+  lambda?: number
+}
+
+async function handleChat(message: ChatRequest, tabId: number): Promise<void> {
+  const session = await getSession()
+  const mcpUrl = session?.mcp_server_url ?? DEFAULT_MCP_URL
+
+  try {
+    const resp = await fetch(`${mcpUrl}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        question: message.question,
+        game_state: message.game_state,
+        current_recommendation: message.current_recommendation,
+        lambda: message.lambda ?? 0.5,
+        session_id: session?.session_id,
+      }),
+    })
+    if (!resp.ok) { console.error('[BG] chat failed', resp.status); return }
+    const result = await resp.json()
+    chrome.tabs.sendMessage(tabId, { type: 'CHAT_RESPONSE', result })
+  } catch (err) {
+    console.error('[BG] chat error:', err)
+  }
+}
 
 // ── Auto-start on pokernow.com ────────────────────────────────────────────────
 

@@ -193,6 +193,7 @@ server.app.options('/monitor', preflight)
 server.app.options('/ingest',  preflight)
 server.app.options('/decide',  preflight)
 server.app.options('/lookup',  preflight)
+server.app.options('/chat',    preflight)
 
 server.app.post('/monitor', async (c) => {
   const { source_url } = await c.req.json<{ source_url: string }>()
@@ -216,6 +217,14 @@ server.app.post('/lookup', async (c) => {
   const { player_id } = await c.req.json<{ player_id: string }>()
   const profile = await dbLookup(player_id)
   return c.json(JSON.parse(JSON.stringify(profile)))
+})
+
+server.app.post('/chat', async (c) => {
+  const { question, game_state, current_recommendation, lambda, session_id } =
+    await c.req.json<{ question: string; game_state?: Parameters<typeof handChat>[1]['game_state']; current_recommendation?: string; lambda?: number; session_id?: string }>()
+  const history = session_id ? await getChatHistory(session_id, 10) : []
+  const result = await handChat(question, { game_state, current_recommendation, lambda, session_id }, history)
+  return c.json(JSON.parse(JSON.stringify(result)))
 })
 
 // ── Start ─────────────────────────────────────────────────────────────────────
