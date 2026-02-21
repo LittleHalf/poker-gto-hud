@@ -186,8 +186,8 @@ server.app.use('*', async (c, next) => {
   c.res.headers.set('Access-Control-Allow-Headers', 'Content-Type')
 })
 
-server.app.options('/monitor', (c) => c.text('', 204))
-server.app.options('/ingest', (c) => c.text('', 204))
+server.app.options('/monitor', () => new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } }))
+server.app.options('/ingest', () => new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } }))
 
 server.app.post('/monitor', async (c) => {
   const { source_url } = await c.req.json<{ source_url: string }>()
