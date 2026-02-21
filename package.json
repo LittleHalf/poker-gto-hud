@@ -15,7 +15,7 @@
     "start": "mcp-use start",
     "deploy": "mcp-use deploy",
     "build:ext": "npm run build --workspace=packages/browser-bridge",
-    "postinstall": "mcp-use generate-types || true"
+    "postinstall": "mcp-use generate-types --server index.ts || true"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.36.3",

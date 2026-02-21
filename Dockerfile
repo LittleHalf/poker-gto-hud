@@ -8,6 +8,7 @@ FROM node:25-alpine AS builder
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/browser-bridge/package.json ./packages/browser-bridge/
+COPY index.ts ./
 RUN npm install
 COPY . .
 RUN npm run build
