@@ -34,6 +34,7 @@ let lastDecisionState = ''
 let currentGameState: GameState | null = null
 let currentRecommendation = ''
 let isWaitingForChat = false
+let manualCards: string[] = []  // user-entered override
 
 // ── HUD ───────────────────────────────────────────────────────────────────────
 
@@ -60,6 +61,12 @@ function injectHUD(): void {
     #pgtohud-lambda-row { display:flex;align-items:center;gap:6px;font-size:10px;color:#555; }
     #pgtohud-slider { flex:1;height:3px;accent-color:#1d4ed8;cursor:pointer; }
     #pgtohud-lambda-label { font-size:10px;color:#555;text-align:center;margin-top:2px;margin-bottom:6px; }
+    #pgtohud-manual-row { display:flex;gap:3px;margin-bottom:5px; }
+    #pgtohud-manual-input { flex:1;background:#0d1b2a;border:1px solid #1e3a5f;border-radius:4px;color:#e0e0e0;font-size:10px;padding:3px 6px;outline:none; }
+    #pgtohud-manual-input:focus { border-color:#f59e0b; }
+    #pgtohud-manual-set, #pgtohud-manual-clear { background:#1e3a5f;border:none;color:#aaa;border-radius:4px;padding:3px 7px;cursor:pointer;font-size:10px; }
+    #pgtohud-manual-set:hover { background:#1d4ed8;color:#fff; }
+    #pgtohud-manual-clear:hover { background:#7f1d1d;color:#fff; }
     #pgtohud-chat { display:none;border-top:1px solid #1e3a5f;padding-top:6px;margin-top:4px; }
     #pgtohud-msgs { max-height:150px;overflow-y:auto;font-size:11px;line-height:1.4;margin-bottom:5px; }
     .pgto-user { color:#60a5fa;margin-bottom:3px; }
@@ -98,6 +105,11 @@ function injectHUD(): void {
         <span>Exploit</span>
       </div>
       <div id="pgtohud-lambda-label">λ = 0.50 · Balanced</div>
+      <div id="pgtohud-manual-row">
+        <input type="text" id="pgtohud-manual-input" placeholder="Manual cards: Ah Kd"/>
+        <button id="pgtohud-manual-set">Set</button>
+        <button id="pgtohud-manual-clear" style="display:none">✕</button>
+      </div>
       <div id="pgtohud-chat">
         <div id="pgtohud-msgs"></div>
         <div id="pgtohud-suggestions"></div>
@@ -133,6 +145,31 @@ function injectHUD(): void {
     lastDecisionState = ''
     isWaitingForDecision = false
     triggerDecision()
+  })
+
+  // Manual card input
+  document.getElementById('pgtohud-manual-set')!.addEventListener('click', () => {
+    const inp = document.getElementById('pgtohud-manual-input') as HTMLInputElement
+    const raw = inp.value.trim()
+    if (!raw) return
+    // Parse space-separated cards like "Ah Kd" or "Ah, Kd"
+    const cards = raw.split(/[\s,]+/).map(c => c.trim()).filter(c => /^[AKQJTakqjt2-9]{1,2}[shdcSHDC♠♥♦♣]$/.test(c))
+    if (cards.length < 2) { setHudStatus('Invalid cards — try e.g. Ah Kd'); return }
+    manualCards = cards
+    document.getElementById('pgtohud-manual-clear')!.style.display = 'inline'
+    setHudStatus(`Manual: ${cards.join(' ')} — press ▶ to analyze`)
+    lastDecisionState = ''
+    isWaitingForDecision = false
+    triggerDecision()
+  })
+  document.getElementById('pgtohud-manual-input')!.addEventListener('keydown', (e: Event) => {
+    if ((e as KeyboardEvent).key === 'Enter') document.getElementById('pgtohud-manual-set')?.click()
+  })
+  document.getElementById('pgtohud-manual-clear')!.addEventListener('click', () => {
+    manualCards = []
+    ;(document.getElementById('pgtohud-manual-input') as HTMLInputElement).value = ''
+    document.getElementById('pgtohud-manual-clear')!.style.display = 'none'
+    setHudStatus('Manual cards cleared')
   })
 
   // Chat toggle
@@ -301,6 +338,9 @@ function extractGameState(): GameState | null {
       if (c.length) { heroCards = c; break }
     }
   }
+  // Manual override wins over DOM scraping
+  if (manualCards.length >= 2) heroCards = manualCards
+
   if (!heroCards.length) { setDetected(null); return null }
 
   // Board
@@ -385,26 +425,50 @@ function sendEvent(event: GameEvent): void {
 const seenLogEntries = new Set<string>()
 
 function scanActionLog(): void {
-  for (const sel of ['.log-entry','.game-log-entry','[class*="log-entry"]','.timeline-entry']) {
-    for (const entry of document.querySelectorAll(sel)) {
-      const text = entry.textContent?.trim() ?? ''
-      if (!text || seenLogEntries.has(text)) continue
-      seenLogEntries.add(text)
-      const m = text.match(/^(.+?)\s+(raises?|calls?|checks?|folds?|bets?)/i)
-      if (!m) continue
-      const [, playerName, rawAction] = m
-      const amount = parseFloat(text.match(/(\d+(?:\.\d+)?)\s*$/)?.[1] ?? '0') || 0
-      sendEvent({
-        type: 'ACTION',
-        timestamp: Date.now(),
-        payload: {
-          player_id: btoa(playerName.trim()).replace(/[+/=]/g, ''),
-          player_name: playerName.trim(),
-          action: rawAction.toLowerCase().replace(/s$/, ''),
-          amount,
-        },
-      })
-    }
+  // Try specific selectors first, then fall back to broad text search
+  const specificSelectors = [
+    '.log-entry', '.game-log-entry', '[class*="log-entry"]',
+    '.timeline-entry', '[class*="timeline"]', '[class*="game-log"]',
+    '[class*="action-log"]', '[class*="hand-history"]', '[class*="chat"] li',
+    '[class*="message-item"]', '[class*="msg-item"]',
+  ]
+
+  const found: Element[] = []
+  for (const sel of specificSelectors) {
+    const els = [...document.querySelectorAll(sel)]
+    if (els.length > 0) { found.push(...els); break }
+  }
+
+  // Broad fallback: any short text node containing poker action words
+  if (found.length === 0) {
+    document.querySelectorAll('p, span, div, li').forEach(el => {
+      const text = el.textContent?.trim() ?? ''
+      if (text.length > 5 && text.length < 100 &&
+          /\b(raises?|calls?|checks?|folds?|bets?)\b/i.test(text) &&
+          el.children.length === 0) {
+        found.push(el)
+      }
+    })
+  }
+
+  for (const entry of found) {
+    const text = entry.textContent?.trim() ?? ''
+    if (!text || seenLogEntries.has(text)) continue
+    seenLogEntries.add(text)
+    const m = text.match(/^(.+?)\s+(raises?|calls?|checks?|folds?|bets?)/i)
+    if (!m) continue
+    const [, playerName, rawAction] = m
+    const amount = parseFloat(text.match(/(\d+(?:\.\d+)?)\s*$/)?.[1] ?? '0') || 0
+    sendEvent({
+      type: 'ACTION',
+      timestamp: Date.now(),
+      payload: {
+        player_id: btoa(playerName.trim()).replace(/[+/=]/g, ''),
+        player_name: playerName.trim(),
+        action: rawAction.toLowerCase().replace(/s$/, ''),
+        amount,
+      },
+    })
   }
 }
 

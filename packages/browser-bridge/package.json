@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "build": "tsc && npm run copy-manifest",
-    "copy-manifest": "cp manifest.json dist/manifest.json",
+    "copy-manifest": "cp manifest.json dist/manifest.json && cp src/popup.html dist/popup.html",
     "dev": "tsc --watch"
   },
   "devDependencies": {

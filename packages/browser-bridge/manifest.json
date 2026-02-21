@@ -10,7 +10,7 @@
     "tabs"
   ],
   "host_permissions": [
-    "https://www.pokernow.club/*",
+    "https://www.pokernow.com/*",
     "https://gentle-grass-l9c8r.run.mcp-use.com/*",
     "http://localhost:*/*"
   ],
@@ -20,12 +20,13 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.pokernow.club/*"],
+      "matches": ["https://www.pokernow.com/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
     }
   ],
   "action": {
-    "default_title": "Poker GTO HUD"
+    "default_title": "Poker GTO HUD",
+    "default_popup": "popup.html"
   }
 }

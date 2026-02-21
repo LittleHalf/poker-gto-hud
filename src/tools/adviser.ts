@@ -1,6 +1,10 @@
+import Anthropic from '@anthropic-ai/sdk'
 import { getGtoAction } from '../engine/gto.js'
 import { getExploitAction } from '../engine/exploit.js'
 import { getStats } from '../db/stats.js'
+import { computeTag } from '../engine/stats.js'
+
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 export interface GameState {
   street: 'PREFLOP' | 'FLOP' | 'TURN' | 'RIVER'
@@ -28,46 +32,90 @@ export async function adviserGetDecision(
   game_state: GameState,
   lambda: number
 ): Promise<Decision> {
-  // Fetch villain stats for primary villain (last aggressor or first villain)
   const primaryVillain = game_state.villains[0]
   const villainStats = primaryVillain ? await getStats(primaryVillain.player_id) : null
 
-  // Get GTO baseline
+  // Rule-based signals (used as context for Claude + as fallback)
   const gtoResult = getGtoAction(game_state)
-
-  // Get exploit recommendation
   const exploitResult = getExploitAction(game_state, villainStats)
 
-  // Compute confidence from sample size
   const sampleSize = villainStats?.vpip_denom ?? 0
   const confidence = Math.min(1.0, sampleSize / 30)
 
-  // Lambda interpolation: blend GTO and exploit scores
-  // When lambda is low or confidence is low, fall back toward GTO
-  const effectiveLambda = lambda * confidence
-  const finalAction = effectiveLambda >= 0.5 ? exploitResult.action : gtoResult.action
-  const finalSizing = effectiveLambda >= 0.5 ? exploitResult.sizing : gtoResult.sizing
-
-  const confidenceLabel =
-    sampleSize < 5 ? `Low confidence (${sampleSize} hands — new player)`
-    : sampleSize < 30 ? `Medium confidence (${sampleSize} hands)`
-    : `High confidence (${sampleSize} hands)`
-
-  let reasoning: string
-  if (lambda < 0.1) {
-    reasoning = `GTO play: ${gtoResult.reasoning}`
-  } else if (effectiveLambda >= 0.5) {
-    reasoning = `${exploitResult.reasoning} ${confidenceLabel}.`
-  } else {
-    reasoning = `Leaning GTO (${confidenceLabel}). ${gtoResult.reasoning}. Exploit signal: ${exploitResult.reasoning}`
+  // Build villain context string
+  let villainContext = 'No villain data yet (new player or first hands).'
+  if (villainStats && sampleSize > 0) {
+    const tag = computeTag(villainStats)
+    const vpip = sampleSize > 0 ? `${(villainStats.vpip_num / sampleSize * 100).toFixed(0)}%` : 'N/A'
+    const pfr  = villainStats.pfr_denom > 0 ? `${(villainStats.pfr_num / villainStats.pfr_denom * 100).toFixed(0)}%` : 'N/A'
+    const af   = villainStats.af_calls > 0 ? (villainStats.af_bets / villainStats.af_calls).toFixed(2) : 'N/A'
+    const f3b  = villainStats.fold_to_3bet_denom > 0 ? `${(villainStats.fold_to_3bet_num / villainStats.fold_to_3bet_denom * 100).toFixed(0)}%` : 'N/A'
+    const fcb  = villainStats.cbet_fold_denom > 0 ? `${(villainStats.cbet_fold_num / villainStats.cbet_fold_denom * 100).toFixed(0)}%` : 'N/A'
+    villainContext = `[${tag}] ${sampleSize} hands: VPIP=${vpip}, PFR=${pfr}, AF=${af}, Fold→3bet=${f3b}, Fold→Cbet=${fcb}, Stack=${primaryVillain.position} ${primaryVillain.stack_bb}bb`
   }
 
-  return {
-    action: finalAction,
-    sizing: finalSizing,
-    reasoning,
-    confidence,
-    gto_action: `${gtoResult.action}${gtoResult.sizing ? ' ' + gtoResult.sizing : ''}`,
-    exploit_action: `${exploitResult.action}${exploitResult.sizing ? ' ' + exploitResult.sizing : ''}`,
+  const strategyMode = lambda < 0.2 ? 'Pure GTO — ignore villain tendencies'
+    : lambda > 0.8 ? 'Maximum exploit — heavily weight villain tendencies'
+    : `Balanced (λ=${lambda.toFixed(2)}) — blend GTO with villain reads`
+
+  const prompt = `You are an expert poker GTO coach. Analyze this hand and give the optimal action.
+
+Street: ${game_state.street}
+Hero: ${game_state.hero_position}, holding ${game_state.hero_cards.join(' ')}
+Board: ${game_state.board.length ? game_state.board.join(' ') : '(none — preflop)'}
+Pot: ${game_state.pot_bb}bb | To call: ${game_state.to_call_bb}bb | Hero stack: ${game_state.stack_bb}bb
+Recent action: ${game_state.action_history.slice(-6).join(' → ') || 'none'}
+Villain: ${villainContext}
+Strategy mode: ${strategyMode}
+Rule-based signals: GTO=${gtoResult.action}${gtoResult.sizing ? ' ' + gtoResult.sizing : ''}, Exploit=${exploitResult.action}${exploitResult.sizing ? ' ' + exploitResult.sizing : ''}
+
+Respond with ONLY a raw JSON object — no markdown, no code fences:
+{"action":"FOLD|CHECK|CALL|BET|RAISE","sizing":"e.g. 2.5x or 67% pot (null if none)","reasoning":"one concise sentence explaining the key reason","confidence":0.0}`
+
+  try {
+    const resp = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 180,
+      messages: [{ role: 'user', content: prompt }],
+    })
+
+    const text = resp.content[0].type === 'text' ? resp.content[0].text.trim() : ''
+    // Strip any accidental markdown fences
+    const jsonText = text.replace(/^```(?:json)?|```$/gm, '').trim()
+    const parsed = JSON.parse(jsonText) as {
+      action: Decision['action']
+      sizing: string | null
+      reasoning: string
+      confidence: number
+    }
+
+    return {
+      action: parsed.action,
+      sizing: parsed.sizing ?? undefined,
+      reasoning: parsed.reasoning,
+      confidence: parsed.confidence ?? confidence,
+      gto_action: `${gtoResult.action}${gtoResult.sizing ? ' ' + gtoResult.sizing : ''}`,
+      exploit_action: `${exploitResult.action}${exploitResult.sizing ? ' ' + exploitResult.sizing : ''}`,
+    }
+  } catch (err) {
+    // Fallback to rule-based if Claude is unavailable or returns bad JSON
+    console.error('[adviser] Claude failed, falling back to rule-based:', err)
+    const effectiveLambda = lambda * confidence
+    const finalAction = effectiveLambda >= 0.5 ? exploitResult.action : gtoResult.action
+    const finalSizing = effectiveLambda >= 0.5 ? exploitResult.sizing : gtoResult.sizing
+    const confidenceLabel = sampleSize < 5 ? `Low confidence (${sampleSize} hands)`
+      : sampleSize < 30 ? `Medium confidence (${sampleSize} hands)`
+      : `High confidence (${sampleSize} hands)`
+
+    return {
+      action: finalAction,
+      sizing: finalSizing,
+      reasoning: effectiveLambda >= 0.5
+        ? `${exploitResult.reasoning} ${confidenceLabel}.`
+        : `${gtoResult.reasoning}. ${confidenceLabel}.`,
+      confidence,
+      gto_action: `${gtoResult.action}${gtoResult.sizing ? ' ' + gtoResult.sizing : ''}`,
+      exploit_action: `${exploitResult.action}${exploitResult.sizing ? ' ' + exploitResult.sizing : ''}`,
+    }
   }
 }

@@ -33,14 +33,20 @@ export async function handChat(
     { role: 'user', content: question },
   ]
 
-  const resp = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 400,
-    system: systemPrompt,
-    messages,
-  })
-
-  const answer = resp.content[0].type === 'text' ? resp.content[0].text : ''
+  let answer: string
+  try {
+    const resp = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 400,
+      system: systemPrompt,
+      messages,
+    })
+    answer = resp.content[0].type === 'text' ? resp.content[0].text : ''
+    if (!answer) answer = 'No response from Claude. Check ANTHROPIC_API_KEY is set in server env vars.'
+  } catch (err) {
+    console.error('[chat] Claude API error:', err)
+    answer = `Claude API error: ${err instanceof Error ? err.message : String(err)}. Make sure ANTHROPIC_API_KEY is set in your deployment environment.`
+  }
   const suggestions = generateFollowUps(question, context)
 
   if (context.session_id) {
