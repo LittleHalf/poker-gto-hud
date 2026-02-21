@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "poker-live-mcp": {
+      "command": "node",
+      "args": ["packages/mcp-server/dist/index.js"],
+      "env": {
+        "DB_CONNECTION_STRING": "poker.db",
+        "ANTHROPIC_API_KEY": ""
+      }
+    }
+  }
+}

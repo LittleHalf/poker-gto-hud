@@ -1,0 +1,16 @@
+name: poker-gto-hud
+build:
+  command: npm run build --workspace=packages/mcp-server
+  output: packages/mcp-server/dist
+server:
+  entry: packages/mcp-server/dist/index.js
+env:
+  - DB_CONNECTION_STRING    # SQLite path or Postgres URL
+  - ANTHROPIC_API_KEY       # For LLM opponent notes
+observability:
+  traces:
+    - span: hand_ingest → adviser_get_decision
+      alert_ms: 500         # Alert if >500ms
+  alerts:
+    - metric: error_rate
+      threshold: 0.05       # Alert if >5% errors
