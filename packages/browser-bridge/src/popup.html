@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 280px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 13px;
+      background: #0f0f0f;
+      color: #e0e0e0;
+      padding: 14px;
+    }
+    h1 {
+      font-size: 13px;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #555;
+      flex-shrink: 0;
+    }
+    .dot.connected { background: #22c55e; box-shadow: 0 0 6px #22c55e88; }
+    .dot.error     { background: #ef4444; }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 0;
+      border-bottom: 1px solid #1f1f1f;
+      gap: 8px;
+    }
+    .row:last-child { border-bottom: none; }
+    .label { color: #888; flex-shrink: 0; }
+    .value {
+      color: #d4d4d4;
+      font-family: monospace;
+      font-size: 11px;
+      text-align: right;
+      word-break: break-all;
+    }
+    .value.ok   { color: #22c55e; }
+    .value.warn { color: #f59e0b; }
+    .value.err  { color: #ef4444; }
+    button {
+      margin-top: 12px;
+      width: 100%;
+      padding: 7px;
+      border: none;
+      border-radius: 5px;
+      background: #1d4ed8;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    button:hover { background: #2563eb; }
+    button:disabled { background: #333; color: #666; cursor: default; }
+    #log {
+      margin-top: 10px;
+      font-size: 10px;
+      color: #555;
+      font-family: monospace;
+      max-height: 60px;
+      overflow-y: auto;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <h1><span class="dot" id="dot"></span>Poker GTO HUD</h1>
+
+  <div class="row">
+    <span class="label">Status</span>
+    <span class="value" id="status">Checking...</span>
+  </div>
+  <div class="row">
+    <span class="label">Session</span>
+    <span class="value" id="session">—</span>
+  </div>
+  <div class="row">
+    <span class="label">Table URL</span>
+    <span class="value" id="table">—</span>
+  </div>
+  <div class="row">
+    <span class="label">MCP Server</span>
+    <span class="value" id="server">—</span>
+  </div>
+
+  <button id="btn" disabled>Start Session</button>
+  <div id="log"></div>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

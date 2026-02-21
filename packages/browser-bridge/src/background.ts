@@ -1,10 +1,21 @@
-// Background service worker — receives GameEvents from content script,
-// forwards them to the MCP server via HTTP POST.
+// Background service worker
 
 interface GameEvent {
   type: string
   timestamp: number
   payload: Record<string, unknown>
+}
+
+interface GameState {
+  street: string
+  hero_position: string
+  hero_cards: string[]
+  board: string[]
+  pot_bb: number
+  to_call_bb: number
+  stack_bb: number
+  villains: Array<{ player_id: string; position: string; stack_bb: number }>
+  action_history: string[]
 }
 
 interface StoredSession {
@@ -15,10 +26,10 @@ interface StoredSession {
 
 const DEFAULT_MCP_URL = 'https://gentle-grass-l9c8r.run.mcp-use.com'
 
-// ── Storage helpers ──────────────────────────────────────────────────────────
+// ── Storage ───────────────────────────────────────────────────────────────────
 
 async function getSession(): Promise<StoredSession | null> {
-  const result = await chrome.storage.local.get('active_session')
+  const result = await chrome.storage.local.get(['active_session', 'lambda'])
   return (result.active_session as StoredSession) ?? null
 }
 
@@ -26,50 +37,125 @@ async function setSession(session: StoredSession): Promise<void> {
   await chrome.storage.local.set({ active_session: session })
 }
 
+async function getLambda(): Promise<number> {
+  const result = await chrome.storage.local.get('lambda')
+  return (result.lambda as number) ?? 0.5
+}
+
 // ── Event forwarding ─────────────────────────────────────────────────────────
 
 async function forwardEvent(event: GameEvent): Promise<void> {
   const session = await getSession()
-  if (!session) {
-    console.warn('[BG] No active session — drop event', event.type)
-    return
-  }
-
-  const body = JSON.stringify({ event, session_id: session.session_id })
+  if (!session) return
 
   try {
-    const resp = await fetch(`${session.mcp_server_url}/ingest`, {
+    await fetch(`${session.mcp_server_url}/ingest`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body,
+      body: JSON.stringify({ event, session_id: session.session_id }),
+    })
+  } catch (err) {
+    console.error('[BG] ingest error:', err)
+  }
+}
+
+// ── Decision request ─────────────────────────────────────────────────────────
+
+async function requestDecision(game_state: GameState, tabId: number): Promise<void> {
+  const session = await getSession()
+  if (!session) return
+
+  const lambda = await getLambda()
+
+  try {
+    const resp = await fetch(`${session.mcp_server_url}/decide`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ game_state, lambda }),
     })
 
     if (!resp.ok) {
-      console.error('[BG] Ingest failed', resp.status, await resp.text())
+      console.error('[BG] decide failed', resp.status)
+      return
     }
+
+    const decision = await resp.json()
+    chrome.tabs.sendMessage(tabId, { type: 'DECISION_RESULT', decision, lambda })
   } catch (err) {
-    console.error('[BG] Network error forwarding event:', err)
+    console.error('[BG] decide error:', err)
   }
+}
+
+// ── Villain lookup ────────────────────────────────────────────────────────────
+
+async function lookupVillain(player_id: string, tabId: number): Promise<void> {
+  const session = await getSession()
+  if (!session) return
+
+  try {
+    const resp = await fetch(`${session.mcp_server_url}/lookup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ player_id }),
+    })
+    if (!resp.ok) return
+    const profile = await resp.json()
+    chrome.tabs.sendMessage(tabId, { type: 'VILLAIN_PROFILE', profile })
+  } catch (err) {
+    console.error('[BG] lookup error:', err)
+  }
+}
+
+// ── Session start ─────────────────────────────────────────────────────────────
+
+async function startSession(source_url: string, mcp_server_url: string): Promise<StoredSession> {
+  const resp = await fetch(`${mcp_server_url}/monitor`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source_url }),
+  })
+  if (!resp.ok) throw new Error(`monitor failed: ${resp.status}`)
+  const { session_id } = await resp.json() as { session_id: string }
+  const session: StoredSession = { session_id, source_url, mcp_server_url }
+  await setSession(session)
+  return session
 }
 
 // ── Message handling ─────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const tabId = sender.tab?.id
+
   if (message.type === 'GAME_EVENT') {
     forwardEvent(message.event as GameEvent).catch(console.error)
     sendResponse({ ok: true })
     return true
   }
 
+  if (message.type === 'REQUEST_DECISION') {
+    if (tabId) requestDecision(message.game_state as GameState, tabId).catch(console.error)
+    sendResponse({ ok: true })
+    return true
+  }
+
+  if (message.type === 'LOOKUP_VILLAIN') {
+    if (tabId) lookupVillain(message.player_id as string, tabId).catch(console.error)
+    sendResponse({ ok: true })
+    return true
+  }
+
+  if (message.type === 'SET_LAMBDA') {
+    chrome.storage.local.set({ lambda: message.lambda }).catch(console.error)
+    sendResponse({ ok: true })
+    return true
+  }
+
   if (message.type === 'START_SESSION') {
-    // Called by popup or devtools panel to register the game URL
-    const { source_url, mcp_server_url = DEFAULT_MCP_URL } = message as {
-      source_url: string; mcp_server_url?: string
-    }
+    const { source_url, mcp_server_url = DEFAULT_MCP_URL } = message as { source_url: string; mcp_server_url?: string }
     startSession(source_url, mcp_server_url)
       .then(session => sendResponse({ ok: true, session }))
       .catch(err => sendResponse({ ok: false, error: String(err) }))
-    return true  // Keep channel open for async response
+    return true
   }
 
   if (message.type === 'GET_SESSION') {
@@ -78,37 +164,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 })
 
-async function startSession(source_url: string, mcp_server_url: string): Promise<StoredSession> {
-  const resp = await fetch(`${mcp_server_url}/monitor`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ source_url }),
-  })
+// ── Auto-start on pokernow.com ────────────────────────────────────────────────
 
-  if (!resp.ok) throw new Error(`monitor_start failed: ${resp.status}`)
-
-  const { session_id } = await resp.json() as { session_id: string }
-  const session: StoredSession = { session_id, source_url, mcp_server_url }
-  await setSession(session)
-  return session
-}
-
-// ── Tab monitoring ────────────────────────────────────────────────────────────
-
-// Auto-start session when user navigates to a PokerNow game tab
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.status !== 'complete') return
-  if (!tab.url?.includes('pokernow.club/games/')) return
+  if (!tab.url?.includes('pokernow.com/games/')) return
 
   const session = await getSession()
-  if (session?.source_url === tab.url) return  // Already monitoring this tab
+  if (session?.source_url === tab.url) return
 
   try {
-    const mcpUrl = DEFAULT_MCP_URL
-    await startSession(tab.url, mcpUrl)
+    await startSession(tab.url, DEFAULT_MCP_URL)
     console.log('[BG] Auto-started session for', tab.url)
   } catch (err) {
-    console.error('[BG] Auto-start session failed:', err)
+    console.error('[BG] Auto-start failed:', err)
   }
 })
 

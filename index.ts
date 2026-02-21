@@ -186,8 +186,13 @@ server.app.use('*', async (c, next) => {
   c.res.headers.set('Access-Control-Allow-Headers', 'Content-Type')
 })
 
-server.app.options('/monitor', () => new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } }))
-server.app.options('/ingest', () => new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } }))
+const CORS_HEADERS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' }
+const preflight = () => new Response(null, { status: 204, headers: CORS_HEADERS })
+
+server.app.options('/monitor', preflight)
+server.app.options('/ingest',  preflight)
+server.app.options('/decide',  preflight)
+server.app.options('/lookup',  preflight)
 
 server.app.post('/monitor', async (c) => {
   const { source_url } = await c.req.json<{ source_url: string }>()
@@ -199,6 +204,18 @@ server.app.post('/ingest', async (c) => {
   const { event, session_id } = await c.req.json<{ event: Parameters<typeof handIngest>[0]; session_id: string }>()
   const state = await handIngest(event, session_id)
   return c.json(JSON.parse(JSON.stringify(state)))
+})
+
+server.app.post('/decide', async (c) => {
+  const { game_state, lambda = 0.5 } = await c.req.json<{ game_state: Parameters<typeof adviserGetDecision>[0]; lambda?: number }>()
+  const decision = await adviserGetDecision(game_state, lambda)
+  return c.json(JSON.parse(JSON.stringify(decision)))
+})
+
+server.app.post('/lookup', async (c) => {
+  const { player_id } = await c.req.json<{ player_id: string }>()
+  const profile = await dbLookup(player_id)
+  return c.json(JSON.parse(JSON.stringify(profile)))
 })
 
 // ── Start ─────────────────────────────────────────────────────────────────────
