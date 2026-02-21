@@ -166,7 +166,7 @@ server.tool(
     }),
   },
   async ({ question, game_state, current_recommendation, lambda, session_id }) => {
-    const history = session_id ? getChatHistory(session_id, 10) : []
+    const history = session_id ? await getChatHistory(session_id, 10) : []
     const result = await handChat(
       question,
       { game_state, current_recommendation, lambda, session_id },

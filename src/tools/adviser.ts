@@ -30,7 +30,7 @@ export async function adviserGetDecision(
 ): Promise<Decision> {
   // Fetch villain stats for primary villain (last aggressor or first villain)
   const primaryVillain = game_state.villains[0]
-  const villainStats = primaryVillain ? getStats(primaryVillain.player_id) : null
+  const villainStats = primaryVillain ? await getStats(primaryVillain.player_id) : null
 
   // Get GTO baseline
   const gtoResult = getGtoAction(game_state)

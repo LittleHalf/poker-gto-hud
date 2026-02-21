@@ -1,4 +1,4 @@
-import { dbGet, dbAll, dbRun } from './client.js'
+import { dbGet, dbAll, dbRun, IS_PG } from './client.js'
 import { createHash } from 'crypto'
 
 export interface Player {
@@ -14,27 +14,31 @@ export function hashPlayerId(name: string): string {
   return createHash('sha256').update(name.toLowerCase().trim()).digest('hex')
 }
 
-export function upsertPlayer(id: string, name: string): void {
-  dbRun(
+export async function upsertPlayer(id: string, name: string): Promise<void> {
+  const nowExpr = IS_PG ? 'NOW()' : "datetime('now')"
+  await dbRun(
     `INSERT INTO players (id, name, total_hands)
      VALUES (?, ?, 0)
      ON CONFLICT(id) DO UPDATE SET
-       last_seen = datetime('now'),
+       last_seen = ${nowExpr},
        total_hands = total_hands + 1`,
     id, name
   )
-  // Ensure stats row exists
-  dbRun(`INSERT OR IGNORE INTO stats (player_id) VALUES (?)`, id)
+  if (IS_PG) {
+    await dbRun(`INSERT INTO stats (player_id) VALUES (?) ON CONFLICT DO NOTHING`, id)
+  } else {
+    await dbRun(`INSERT OR IGNORE INTO stats (player_id) VALUES (?)`, id)
+  }
 }
 
-export function getPlayer(id: string): Player | null {
+export async function getPlayer(id: string): Promise<Player | null> {
   return dbGet<Player>('SELECT * FROM players WHERE id = ?', id)
 }
 
-export function updateLlmNotes(id: string, notes: string): void {
-  dbRun('UPDATE players SET llm_notes = ? WHERE id = ?', notes, id)
+export async function updateLlmNotes(id: string, notes: string): Promise<void> {
+  await dbRun('UPDATE players SET llm_notes = ? WHERE id = ?', notes, id)
 }
 
-export function getAllPlayers(): Player[] {
+export async function getAllPlayers(): Promise<Player[]> {
   return dbAll<Player>('SELECT * FROM players ORDER BY last_seen DESC')
 }

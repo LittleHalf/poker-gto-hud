@@ -15,17 +15,17 @@ export interface HandRecord {
   ev_loss: number | null
 }
 
-export function insertHandEvent(session_id: string, event: GameEvent): void {
-  dbRun(
+export async function insertHandEvent(session_id: string, event: GameEvent): Promise<void> {
+  await dbRun(
     `INSERT INTO hand_events (session_id, event_type, timestamp, payload)
      VALUES (?, ?, ?, ?)`,
     session_id, event.type, event.timestamp, JSON.stringify(event.payload)
   )
 }
 
-export function saveHandRecord(record: Omit<HandRecord, 'id' | 'played_at'>): string {
+export async function saveHandRecord(record: Omit<HandRecord, 'id' | 'played_at'>): Promise<string> {
   const id = randomUUID()
-  dbRun(
+  await dbRun(
     `INSERT INTO hand_history
        (id, raw_log, hero_position, hero_cards, board, hero_decision, recommended, lambda_used, ev_loss)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -36,7 +36,7 @@ export function saveHandRecord(record: Omit<HandRecord, 'id' | 'played_at'>): st
   return id
 }
 
-export function getRecentHands(limit = 20): HandRecord[] {
+export async function getRecentHands(limit = 20): Promise<HandRecord[]> {
   return dbAll<HandRecord>(
     'SELECT * FROM hand_history ORDER BY played_at DESC LIMIT ?',
     limit
