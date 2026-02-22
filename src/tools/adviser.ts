@@ -69,7 +69,13 @@ OPPONENT BETS — look for:
 
 POT: number shown in the center of the table
 STACKS: numbers shown under each player's name
-POSITION: look for D chip (=BTN), SB/BB labels near players
+POSITION: look for a white circular chip with a blue "D" on it — whoever has this chip next to their seat is the BTN (dealer). Players immediately to the left are SB then BB. You may also see text labels "SB" and "BB" near those seats.
+
+IMPORTANT — CARDS vs TEXT:
+- Cards in pokernow.com always appear on a WHITE rectangular background with large, bold rank and suit text
+- Do NOT read regular website text, player names, chat messages, or UI labels as cards
+- Only read values from white-background card elements: rank (A K Q J T 9 8 7 6 5 4 3 2) + suit (s=spades ♠, h=hearts ♥, d=diamonds ♦, c=clubs ♣)
+- Suits may appear as colored symbols (red=hearts/diamonds, black=spades/clubs) or letters
 
 ━━ STEP 2: RECOMMEND ACTION ━━
 
