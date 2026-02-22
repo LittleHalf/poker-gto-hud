@@ -41,41 +41,45 @@ export async function analyzeScreenshot(
 
 ━━ STEP 1: READ THE SCREENSHOT ━━
 
-HERO'S HOLE CARDS — the 2 face-up cards at the BOTTOM CENTER of the screen:
-- These are YOUR cards, dealt at the start of the hand and fixed until a new hand begins
-- They do NOT change when community cards are revealed
-- Read these from the bottom-center card display area, NOT from the middle of the table
-- If manual cards are provided above, use those instead
+HERO'S HOLE CARDS — located at the BOTTOM of the screen near the hero's seat:
+- These are YOUR 2 personal cards, fixed for the entire hand
+- They sit at the bottom-left or bottom-center near the hero's chip stack and name
+- They do NOT change when community cards are revealed on the board
+- Do NOT count these toward the board card total
+- If manual cards are provided above, use those instead and skip reading from the screenshot
 
-COMMUNITY CARDS (board) — cards in the MIDDLE OF THE TABLE (center horizontal row):
-- These are the shared cards revealed street by street — completely separate from hero's cards
-- Count only face-up cards in that center row:
-  - 0 cards in center = PREFLOP
-  - EXACTLY 3 cards in center = FLOP
-  - EXACTLY 4 cards in center = TURN
-  - EXACTLY 5 cards in center = RIVER
+COMMUNITY CARDS (board) — the cards laid out HORIZONTALLY IN THE UPPER-CENTER of the table:
+- These are strictly the shared cards in the center of the green felt, clearly separated from any player's seat area
+- They appear in a single horizontal row in the middle of the table
+- Do NOT count the hero's 2 hole cards at the bottom — those are personal cards, not board cards
+- Do NOT count any face-down cards (card backs) — only face-up cards with visible rank and suit
+- Do NOT count cards shown in a promotional overlay or banner
+- Count ONLY the face-up cards in that center board row:
+  - 0 board cards = PREFLOP
+  - EXACTLY 3 board cards = FLOP
+  - EXACTLY 4 board cards = TURN
+  - EXACTLY 5 board cards = RIVER
+- If you see a "POKER NOW PLUS" or any promotional banner overlapping the center, ignore the banner text and count only the actual card faces beneath/around it
 
 HERO IDENTIFICATION — the hero is the player with action buttons at the bottom:
 - Look for buttons labeled CALL, FOLD, CHECK, BET, RAISE at the bottom of the screen
 - "YOUR TURN" text or highlighted action area also indicates it's hero's turn
 - If no action buttons are visible or they appear greyed out → is_hero_turn = false
 
-OPPONENT BETS — look for:
-- Yellow/gold highlighted chip amounts near opponent seats
-- Numbers shown in front of an opponent's position
-- The CALL button label shows exactly how much the hero must call (to_call_bb)
+OPPONENT BETS — in PokerNow, bets appear as a YELLOW-GREEN rounded pill/oval shape with the bet amount number inside it, placed near the betting player's seat:
+- The CALL button at the bottom shows the exact amount hero must call → use that as to_call_bb
 - If CALL button is visible with a number: to_call_bb = that number, action cannot be CHECK
 - If only CHECK button is visible: to_call_bb = 0
 
-POT: number shown in the center of the table
-STACKS: numbers shown under each player's name
-POSITION: look for a white circular chip with a blue "D" on it — whoever has this chip next to their seat is the BTN (dealer). Players immediately to the left are SB then BB. You may also see text labels "SB" and "BB" near those seats.
+POT: the number shown above the board cards labeled "pot"
+STACKS: numbers shown below each player's name
+POSITION: look for a white circular chip with a blue "D" on it — that player is BTN. Players immediately to the left are SB then BB. Text labels "SB" and "BB" may also appear near those seats.
 
 IMPORTANT — CARDS vs TEXT:
-- Cards in pokernow.com always appear on a WHITE rectangular background with large, bold rank and suit text
-- Do NOT read regular website text, player names, chat messages, or UI labels as cards
-- Only read values from white-background card elements: rank (A K Q J T 9 8 7 6 5 4 3 2) + suit (s=spades ♠, h=hearts ♥, d=diamonds ♦, c=clubs ♣)
-- Suits may appear as colored symbols (red=hearts/diamonds, black=spades/clubs) or letters
+- Cards always appear on a WHITE rectangular background with large, bold rank and suit
+- Do NOT read player names, chat text, promotional banners, UI buttons, or stack numbers as cards
+- Only read rank (A K Q J T 9 8 7 6 5 4 3 2) + suit (s/h/d/c or ♠♥♦♣) from white-background card elements
+- Red suit symbols = hearts or diamonds; black = spades or clubs
 
 ━━ STEP 2: RECOMMEND ACTION ━━
 
