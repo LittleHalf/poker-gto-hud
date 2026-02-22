@@ -54,6 +54,7 @@ COMMUNITY CARDS (board) — the cards laid out HORIZONTALLY IN THE UPPER-CENTER 
 - Do NOT count the hero's 2 hole cards at the bottom — those are personal cards, not board cards
 - Do NOT count any face-down cards (card backs) — only face-up cards with visible rank and suit
 - Do NOT count cards shown in a promotional overlay or banner
+- Do NOT count the pot number — it is a plain number at the top-center of the table with no card background. Numbers like "40", "80", "160" near the top of the felt are pot/bet amounts, NOT cards.
 - Count ONLY the face-up cards in that center board row:
   - 0 board cards = PREFLOP
   - EXACTLY 3 board cards = FLOP
@@ -71,8 +72,8 @@ OPPONENT BETS — in PokerNow, bets appear as a YELLOW-GREEN rounded pill/oval s
 - If CALL button is visible with a number: to_call_bb = that number, action cannot be CHECK
 - If only CHECK button is visible: to_call_bb = 0
 
-POT: the number shown above the board cards labeled "pot"
-STACKS: numbers shown below each player's name
+POT: a plain number displayed at the TOP-CENTER of the table, above the board cards — this is the pot size in chips. It is NOT a card. Do NOT include it in the board or count it toward the street. It has no white card background.
+STACKS: numbers shown below each player's name — also NOT cards
 POSITION: look for a white circular chip with a blue "D" on it — that player is BTN. Players immediately to the left are SB then BB. Text labels "SB" and "BB" may also appear near those seats.
 
 IMPORTANT — CARDS vs TEXT:
