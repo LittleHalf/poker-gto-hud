@@ -48,19 +48,19 @@ HERO'S HOLE CARDS — located at the BOTTOM of the screen near the hero's seat:
 - Do NOT count these toward the board card total
 - If manual cards are provided above, use those instead and skip reading from the screenshot
 
-COMMUNITY CARDS (board) — the cards laid out HORIZONTALLY IN THE UPPER-CENTER of the table:
-- These are strictly the shared cards in the center of the green felt, clearly separated from any player's seat area
-- They appear in a single horizontal row in the middle of the table
-- Do NOT count the hero's 2 hole cards at the bottom — those are personal cards, not board cards
-- Do NOT count any face-down cards (card backs) — only face-up cards with visible rank and suit
-- Do NOT count cards shown in a promotional overlay or banner
-- Do NOT count the pot number — it is a plain number at the top-center of the table with no card background. Numbers like "40", "80", "160" near the top of the felt are pot/bet amounts, NOT cards.
-- Count ONLY the face-up cards in that center board row:
-  - 0 board cards = PREFLOP
-  - EXACTLY 3 board cards = FLOP
-  - EXACTLY 4 board cards = TURN
-  - EXACTLY 5 board cards = RIVER
-- If you see a "POKER NOW PLUS" or any promotional banner overlapping the center, ignore the banner text and count only the actual card faces beneath/around it
+COMMUNITY CARDS (board) — a horizontal row of cards in the UPPER-CENTER of the green felt:
+- Each community card looks like this: WHITE ROUNDED-RECTANGLE background, large rank character (A K Q J 10 9 8 7 6 5 4 3 2) printed at the top, large suit symbol (♠ ♥ ♦ ♣) printed in the center/bottom
+- They are evenly spaced in a single horizontal line across the middle of the table
+- They are clearly distinct from the green felt due to their white backgrounds
+- Do NOT count the hero's 2 hole cards at the bottom of the screen — those are personal cards
+- Do NOT count face-down cards (solid colored backs with no rank/suit visible)
+- Do NOT count the pot number — it is a plain number above the board with no card background
+- A "POKER NOW PLUS" or similar promotional banner may appear overlapping this row — ignore all banner text and count only the white-background card elements
+- Count ONLY the white-background face-up cards in that center horizontal row:
+  - 0 cards = PREFLOP
+  - 3 cards = FLOP
+  - 4 cards = TURN
+  - 5 cards = RIVER
 
 HERO IDENTIFICATION — the hero is the player with action buttons at the bottom:
 - Look for buttons labeled CALL, FOLD, CHECK, BET, RAISE at the bottom of the screen
@@ -76,11 +76,15 @@ POT: a plain number displayed at the TOP-CENTER of the table, above the board ca
 STACKS: numbers shown below each player's name — also NOT cards
 POSITION: look for a white circular chip with a blue "D" on it — that player is BTN. Players immediately to the left are SB then BB. Text labels "SB" and "BB" may also appear near those seats.
 
-IMPORTANT — CARDS vs TEXT:
-- Cards always appear on a WHITE rectangular background with large, bold rank and suit
-- Do NOT read player names, chat text, promotional banners, UI buttons, or stack numbers as cards
-- Only read rank (A K Q J T 9 8 7 6 5 4 3 2) + suit (s/h/d/c or ♠♥♦♣) from white-background card elements
-- Red suit symbols = hearts or diamonds; black = spades or clubs
+IMPORTANT — HOW TO IDENTIFY A REAL CARD:
+A card in PokerNow has ALL of these properties:
+  1. White or cream rounded-rectangle background (clearly stands out from the green felt)
+  2. A large rank character at the top: A K Q J 10 9 8 7 6 5 4 3 2
+  3. A large suit symbol in the center or bottom: ♠ (black spade) ♥ (red heart) ♦ (red diamond) ♣ (black club)
+If something does not have all three of these, it is NOT a card. Specifically:
+- Numbers on the green felt without a white background = pot size or bet amount, NOT a card
+- Player names, stack sizes, chat text, banners, buttons = NOT cards
+- Face-down card backs (solid colored, no rank/suit) = NOT counted
 
 ━━ STEP 2: RECOMMEND ACTION ━━
 
