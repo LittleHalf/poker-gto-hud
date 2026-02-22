@@ -98,7 +98,8 @@ Use this image ONLY for:
 ━━ SYNTHESIZE ALL IMAGES AND RECOMMEND ACTION ━━${historyNote}
 
 Strategy: ${strategyMode}
-Consider full hand context. Factor in aggression from previous streets.
+${lambda <= 0.15 ? 'PURE GTO: balanced, disciplined ranges. Raise premiums, call with pot odds, fold marginal hands. Bet 50-67% pot. No over-bluffing.' : ''}${lambda >= 0.85 ? 'MAX EXPLOIT: aggressive. Size up to 75-100% pot for value. Fire 2nd and 3rd barrels. 3-bet wide preflop. Never slow-play. Apply relentless pressure.' : ''}${lambda > 0.15 && lambda < 0.85 ? `BALANCED (λ=${lambda.toFixed(2)}): GTO baseline with ${Math.round(lambda*100)}% weight toward aggression when you have equity advantage.` : ''}
+Consider full hand context. Factor in prior-street aggression.
 Never recommend CHECK if to_call_bb > 0. Never recommend FOLD if to_call_bb = 0.
 If no active hand is in progress, set is_active_hand: false.
 
@@ -114,8 +115,9 @@ HERO CARDS: 2 face-up cards at the bottom of the screen near the hero's seat. Do
 HERO TURN: active CALL/FOLD/CHECK/BET/RAISE buttons at bottom = is_hero_turn true. Greyed/absent = false.
 BETS: CALL button shows to_call_bb. Yellow-green pill shapes near seats show bet amounts.
 POT: plain number at top-center of table. STACKS: numbers under player names. POSITION: white circular D chip = BTN.
-Strategy: ${strategyMode}. Never CHECK if to_call_bb > 0. Never FOLD if to_call_bb = 0.
-If no active hand: is_active_hand: false.
+Strategy: ${strategyMode}
+${lambda <= 0.15 ? 'GTO: play balanced ranges. Raise premiums 3x, call with pot odds, fold marginal. Size bets 50-67% pot. Do NOT over-bluff.' : ''}${lambda >= 0.85 ? 'EXPLOIT: be aggressive. Size up to 75-100% pot for value. Fire multiple barrels. 3-bet liberally. Never slow-play strong hands.' : ''}${lambda > 0.15 && lambda < 0.85 ? `BALANCED (λ=${lambda.toFixed(2)}): use GTO as baseline, deviate toward aggression when you have clear equity advantage.` : ''}
+Never CHECK if to_call_bb > 0. Never FOLD if to_call_bb = 0. If no active hand: is_active_hand: false.
 RESPOND WITH ONLY RAW JSON:
 {"is_active_hand":true,"is_hero_turn":true,"street":"FLOP","hero_cards":["Ts","9d"],"board":["Kd","Kc","8d"],"pot_bb":318,"stack_bb":652,"hero_position":"BB","to_call_bb":278,"action":"FOLD","sizing":null,"reasoning":"T9 has insufficient equity vs KK8 board","confidence":0.88,"gto_action":"FOLD","exploit_action":"FOLD"}`
     content.push(
@@ -135,8 +137,54 @@ RESPOND WITH ONLY RAW JSON:
     const jsonText = text.replace(/^```(?:json)?|```$/gm, '').trim()
     const parsed = JSON.parse(jsonText) as ScreenshotAnalysis
 
-    // If manual cards provided, override
+    // Manual card override
     if (manualCards?.length) parsed.hero_cards = manualCards
+
+    // ── Post-process: enforce lambda with rule-based engines ─────────────────
+    // Claude Vision extracts the game state; the rule-based engines determine
+    // the precise GTO/exploit signals; lambda blending is applied here.
+    if (parsed.is_active_hand && parsed.hero_cards?.length >= 2) {
+      const validStreets = ['PREFLOP', 'FLOP', 'TURN', 'RIVER']
+      const street = validStreets.includes(parsed.street?.toUpperCase())
+        ? parsed.street.toUpperCase() as GameState['street']
+        : 'PREFLOP'
+
+      const syntheticState: GameState = {
+        street,
+        hero_position: parsed.hero_position || 'BTN',
+        hero_cards:    parsed.hero_cards,
+        board:         parsed.board || [],
+        pot_bb:        parsed.pot_bb || 0,
+        to_call_bb:    parsed.to_call_bb || 0,
+        stack_bb:      parsed.stack_bb || 0,
+        villains:      [],
+        action_history: actionHistory ?? [],
+      }
+
+      const gtoResult    = getGtoAction(syntheticState)
+      const exploitResult = getExploitAction(syntheticState, null)
+
+      // Always expose both signals in the output
+      parsed.gto_action     = `${gtoResult.action}${gtoResult.sizing ? ' ' + gtoResult.sizing : ''}`
+      parsed.exploit_action = `${exploitResult.action}${exploitResult.sizing ? ' ' + exploitResult.sizing : ''}`
+
+      // Enforce lambda: at extremes, override Claude's recommendation entirely
+      if (lambda <= 0.15) {
+        // Pure GTO — use rule-based signal directly
+        parsed.action    = gtoResult.action
+        parsed.sizing    = gtoResult.sizing
+        parsed.reasoning = `[GTO λ=0] ${gtoResult.reasoning}`
+        parsed.confidence = 0.85
+      } else if (lambda >= 0.85) {
+        // Max Exploit — use rule-based exploit signal directly
+        parsed.action    = exploitResult.action
+        parsed.sizing    = exploitResult.sizing
+        parsed.reasoning = `[Exploit λ=1] ${exploitResult.reasoning}`
+        parsed.confidence = 0.80
+      }
+      // Mid-range: keep Claude's blended recommendation from the prompt,
+      // but GTO/exploit signals are now rule-based and accurate.
+    }
 
     return parsed
   } catch (err) {

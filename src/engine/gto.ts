@@ -13,12 +13,12 @@ try {
 
 interface GtoCharts {
   preflop: {
-    opening_ranges: Record<string, string[]>    // position → hands
-    threebet_ranges: Record<string, string[]>   // position → hands
-    calling_ranges: Record<string, string[]>    // position → hands
+    opening_ranges: Record<string, string[]>
+    threebet_ranges: Record<string, string[]>
+    calling_ranges: Record<string, string[]>
   }
   postflop: {
-    cbet_frequency: Record<string, number>      // board_texture → frequency
+    cbet_frequency: Record<string, number>
     check_raise_frequency: Record<string, number>
     fold_frequency: Record<string, number>
   }
@@ -28,24 +28,26 @@ export interface GtoResult {
   action: 'FOLD' | 'CHECK' | 'CALL' | 'BET' | 'RAISE'
   sizing?: string
   reasoning: string
-  range_percentile?: number  // How strong hero's hand is within range (0–1)
+  range_percentile?: number
 }
 
 export function getGtoAction(state: GameState): GtoResult {
-  if (state.street === 'PREFLOP') {
-    return getPreflopGtoAction(state)
-  }
+  if (state.street === 'PREFLOP') return getPreflopGtoAction(state)
   return getPostflopGtoAction(state)
 }
+
+// ── Preflop ───────────────────────────────────────────────────────────────────
 
 function getPreflopGtoAction(state: GameState): GtoResult {
   const pos = normalizePosition(state.hero_position)
   const hand = canonicalHand(state.hero_cards)
-  const openingRange = gtoCharts.preflop.opening_ranges[pos] ?? []
+  const openingRange  = gtoCharts.preflop.opening_ranges[pos]  ?? []
   const threebetRange = gtoCharts.preflop.threebet_ranges[pos] ?? []
-  const callingRange = gtoCharts.preflop.calling_ranges[pos] ?? []
+  const callingRange  = gtoCharts.preflop.calling_ranges[pos]  ?? []
 
-  const hasRaise = state.action_history.some(a => a.toLowerCase().includes('raise') || a.toLowerCase().includes('3-bet'))
+  const hasRaise = state.action_history.some(a =>
+    a.toLowerCase().includes('raise') || a.toLowerCase().includes('3-bet') || a.toLowerCase().includes('3bet')
+  )
 
   if (hasRaise) {
     if (threebetRange.includes(hand)) {
@@ -58,111 +60,175 @@ function getPreflopGtoAction(state: GameState): GtoResult {
   }
 
   if (openingRange.includes(hand)) {
-    const sizingBb = pos === 'BTN' || pos === 'CO' ? '2.5x' : '3x'
-    return { action: 'RAISE', sizing: sizingBb, reasoning: `${hand} is in GTO opening range from ${pos}` }
+    const sizing = (pos === 'BTN' || pos === 'CO') ? '2.5x' : '3x'
+    return { action: 'RAISE', sizing, reasoning: `${hand} is in GTO opening range from ${pos}` }
   }
 
   return { action: 'FOLD', reasoning: `${hand} is outside GTO opening range from ${pos}` }
 }
 
+// ── Postflop ──────────────────────────────────────────────────────────────────
+
 function getPostflopGtoAction(state: GameState): GtoResult {
-  const potOdds = state.to_call_bb > 0 ? state.to_call_bb / (state.pot_bb + state.to_call_bb) : 0
-  const boardTexture = getBoardTexture(state.board)
-  const cbetFreq = gtoCharts.postflop.cbet_frequency[boardTexture] ?? 0.5
-  const foldFreq = gtoCharts.postflop.fold_frequency[boardTexture] ?? 0.4
+  const potOdds    = state.to_call_bb > 0 ? state.to_call_bb / (state.pot_bb + state.to_call_bb) : 0
+  const texture    = getBoardTexture(state.board)
+  const strength   = estimateHandStrength(state.hero_cards, state.board)
+  const spr        = state.stack_bb / Math.max(state.pot_bb, 1)
 
   if (state.to_call_bb === 0) {
-    // Facing check — decide to bet or check
-    if (Math.random() < cbetFreq) {
-      return {
-        action: 'BET',
-        sizing: '67% pot',
-        reasoning: `GTO c-bet frequency on ${boardTexture} board is ${(cbetFreq * 100).toFixed(0)}%`,
-      }
+    // No bet to face — decide whether to bet or check
+    if (strength >= 0.70) {
+      const sizing = spr < 3 ? '100% pot' : '67% pot'
+      return { action: 'BET', sizing, reasoning: `GTO value bet ${sizing} — strong hand (${pct(strength)}) on ${texture} board` }
     }
-    return {
-      action: 'CHECK',
-      reasoning: `GTO check frequency on ${boardTexture} board is ${((1 - cbetFreq) * 100).toFixed(0)}%`,
+    if (strength >= 0.55) {
+      return { action: 'BET', sizing: '50% pot', reasoning: `GTO standard bet — top pair/good equity (${pct(strength)}) on ${texture} board` }
     }
+    if (strength >= 0.38 && texture === 'dry') {
+      return { action: 'BET', sizing: '33% pot', reasoning: `GTO probe — dry ${texture} board, balanced range bets small` }
+    }
+    // Check medium/weak hands to protect checking range
+    return { action: 'CHECK', reasoning: `GTO check — medium/weak equity (${pct(strength)}) on ${texture} board, protect check range` }
   }
 
-  // Facing a bet — pot odds decision
-  const handStrength = estimateHandStrength(state.hero_cards, state.board)
-  if (handStrength > potOdds + 0.1) {
-    return {
-      action: 'CALL',
-      reasoning: `Hand strength ${(handStrength * 100).toFixed(0)}% exceeds pot odds ${(potOdds * 100).toFixed(0)}%`,
-    }
+  // Facing a bet
+  if (strength >= 0.72) {
+    return { action: 'RAISE', sizing: '2.5x', reasoning: `GTO raise — strong hand (${pct(strength)}), build pot and deny equity` }
   }
-
-  if (handStrength < foldFreq) {
-    return {
-      action: 'FOLD',
-      reasoning: `Hand strength ${(handStrength * 100).toFixed(0)}% below GTO fold threshold on ${boardTexture} board`,
-    }
+  if (strength > potOdds + 0.08) {
+    return { action: 'CALL', reasoning: `GTO call — equity ${pct(strength)} exceeds pot odds ${pct(potOdds)}` }
   }
-
-  return {
-    action: 'CALL',
-    reasoning: `Borderline call — hand strength ${(handStrength * 100).toFixed(0)}% near pot odds ${(potOdds * 100).toFixed(0)}%`,
+  if (strength < potOdds - 0.05) {
+    return { action: 'FOLD', reasoning: `GTO fold — equity ${pct(strength)} below pot odds ${pct(potOdds)}` }
   }
+  return { action: 'CALL', reasoning: `GTO borderline call — equity ${pct(strength)} ≈ pot odds ${pct(potOdds)}` }
 }
 
-function normalizePosition(pos: string | null): string {
+// ── Hand strength estimation (exported for exploit engine) ────────────────────
+
+const RANKS = '23456789TJQKA'
+const rankIdx = (r: string) => RANKS.indexOf(r.toUpperCase())
+
+export function estimateHandStrength(heroCards: string[], board: string[]): number {
+  if (heroCards.length < 2 || board.length < 3) return 0.40
+
+  const hero   = heroCards.map(c => c.toUpperCase())
+  const boardU = board.map(c => c.toUpperCase())
+  const all    = [...hero, ...boardU]
+
+  const allRanks  = all.map(c => c[0])
+  const allSuits  = all.map(c => c[1])
+  const heroRanks = hero.map(c => c[0])
+  const heroSuits = hero.map(c => c[1])
+  const brdRanks  = boardU.map(c => c[0])
+
+  // Rank counts across all 5-7 cards
+  const rCount = new Map<string, number>()
+  for (const r of allRanks) rCount.set(r, (rCount.get(r) ?? 0) + 1)
+
+  // Suit counts
+  const sCount = new Map<string, number>()
+  for (const s of allSuits) sCount.set(s, (sCount.get(s) ?? 0) + 1)
+
+  const maxRank = Math.max(...rCount.values())
+  const pairs   = [...rCount.values()].filter(v => v >= 2).length
+
+  // Flush / flush draw
+  const hasFlush     = [...sCount.values()].some(v => v >= 5)
+  const hasFlushDraw = heroSuits.some(s => (sCount.get(s) ?? 0) >= 4)
+
+  // Straight check
+  const uIdx = [...new Set(allRanks.map(rankIdx))].sort((a, b) => a - b)
+  let maxConsec = 1, consec = 1
+  for (let i = 1; i < uIdx.length; i++) {
+    consec = uIdx[i] === uIdx[i - 1] + 1 ? consec + 1 : 1
+    maxConsec = Math.max(maxConsec, consec)
+  }
+  const wheel       = [0,1,2,3,12].every(i => uIdx.includes(i))
+  const hasStraight = maxConsec >= 5 || wheel
+  const hasStraightDraw = maxConsec >= 4
+
+  // ── Made hand strength ────────────────────────────────────────────────────
+  if (hasStraight && hasFlush) return 0.99
+  if (maxRank >= 4)             return 0.97    // Quads
+  if (maxRank === 3 && pairs >= 2) return 0.94 // Full house
+  if (hasFlush)                 return 0.88
+  if (hasStraight)              return 0.85
+  if (maxRank === 3)            return 0.80    // Trips
+
+  if (pairs >= 2) {
+    const brdPaired = brdRanks.some((r, i, a) => a.indexOf(r) !== i)
+    return brdPaired ? 0.65 : 0.72             // Two pair
+  }
+
+  if (pairs === 1) {
+    const pairedRank = [...rCount.entries()].find(([, v]) => v >= 2)?.[0]
+    if (!pairedRank) return 0.50
+    const heroMadePair = heroRanks.includes(pairedRank)
+    const sortedBrd    = brdRanks.map(rankIdx).sort((a, b) => b - a)
+    if (!heroMadePair) return 0.30             // Board pair only (hero unpaired)
+    const pr = rankIdx(pairedRank)
+    if (pr > sortedBrd[0]) return 0.72         // Overpair
+    if (pr === sortedBrd[0]) return 0.62       // Top pair
+    if (pr === sortedBrd[1]) return 0.52       // Middle pair
+    return 0.42                                 // Bottom pair
+  }
+
+  // No pair — draws or air
+  const topBrd  = Math.max(...brdRanks.map(rankIdx))
+  const ovrcrds = heroRanks.filter(r => rankIdx(r) > topBrd).length
+
+  if (hasFlushDraw && hasStraightDraw) return 0.46
+  if (hasFlushDraw)  return 0.38
+  if (hasStraightDraw) return 0.32
+  if (ovrcrds >= 2)  return 0.28
+  if (ovrcrds === 1) return 0.22
+  return 0.15                                   // Air
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+export function normalizePosition(pos: string | null): string {
   if (!pos) return 'BTN'
-  // Strip trailing seat index like "BTN_0", "SEAT_3"
   const cleaned = pos.toLowerCase().replace(/_\d+$/, '').replace(/^seat\d*$/, 'btn').trim()
   const map: Record<string, string> = {
     'button': 'BTN', 'btn': 'BTN', 'd': 'BTN', 'dealer': 'BTN',
-    'cutoff': 'CO', 'co': 'CO',
-    'hijack': 'HJ', 'hj': 'HJ',
+    'cutoff': 'CO',  'co': 'CO',
+    'hijack': 'HJ',  'hj': 'HJ',
     'sb': 'SB', 'small blind': 'SB', 'small_blind': 'SB',
-    'bb': 'BB', 'big blind': 'BB', 'big_blind': 'BB',
+    'bb': 'BB', 'big blind': 'BB',   'big_blind': 'BB',
     'utg': 'UTG', 'under the gun': 'UTG',
-    'mp': 'MP', 'middle position': 'MP',
-    'unknown': 'BTN',  // treat unknown as BTN (widest range)
+    'mp': 'MP',  'middle position': 'MP',
+    'unknown': 'BTN',
   }
   return map[cleaned] ?? cleaned.toUpperCase()
 }
 
 function canonicalHand(cards: string[]): string {
   if (cards.length < 2) return 'unknown'
-  const ranks = '23456789TJQKA'
   const [c1, c2] = cards.map(c => c.toUpperCase())
-  const r1 = c1[0], s1 = c1[1]
-  const r2 = c2[0], s2 = c2[1]
+  const r1 = c1[0], s1 = c1[1], r2 = c2[0], s2 = c2[1]
   const suited = s1 === s2 ? 's' : 'o'
-  if (ranks.indexOf(r1) >= ranks.indexOf(r2)) {
-    return `${r1}${r2}${suited}`
-  }
-  return `${r2}${r1}${suited}`
+  return rankIdx(r1) >= rankIdx(r2) ? `${r1}${r2}${suited}` : `${r2}${r1}${suited}`
 }
 
-function getBoardTexture(board: string[]): string {
+export function getBoardTexture(board: string[]): string {
   if (board.length === 0) return 'dry'
-  const suits = board.map(c => c.slice(-1))
-  const uniqueSuits = new Set(suits).size
-  if (uniqueSuits === 1) return 'monotone'
-  if (uniqueSuits === 2) return 'two-tone'
+  const suits   = board.map(c => c.slice(-1))
+  const unique  = new Set(suits).size
+  const rankSet = board.map(c => rankIdx(c[0])).sort((a, b) => a - b)
+  let maxGap = 0
+  for (let i = 1; i < rankSet.length; i++) maxGap = Math.max(maxGap, rankSet[i] - rankSet[i-1])
+
+  if (unique === 1) return 'monotone'
+  if (unique === 2) return 'two-tone'
+  if (maxGap <= 2 && board.length >= 3) return 'connected'
   return 'rainbow'
 }
 
-// Simplified hand strength heuristic (0–1)
-function estimateHandStrength(heroCards: string[], board: string[]): number {
-  if (heroCards.length < 2 || board.length < 3) return 0.4
-  const allCards = [...heroCards, ...board].map(c => c.toUpperCase())
-  const ranks = allCards.map(c => c[0])
-  const rankCounts = new Map<string, number>()
-  for (const r of ranks) rankCounts.set(r, (rankCounts.get(r) ?? 0) + 1)
-  const maxCount = Math.max(...rankCounts.values())
+function pct(n: number): string { return `${(n * 100).toFixed(0)}%` }
 
-  if (maxCount >= 4) return 0.97  // Quads
-  if (maxCount === 3) return 0.85  // Trips / FH
-  const pairs = [...rankCounts.values()].filter(v => v === 2).length
-  if (pairs >= 2) return 0.75      // Two pair
-  if (pairs === 1) return 0.55     // One pair
-  return 0.30                       // High card
-}
+// ── Default charts ────────────────────────────────────────────────────────────
 
 function getDefaultCharts(): GtoCharts {
   const premiums    = ['AAs', 'KKs', 'QQs', 'JJs', 'TTs', 'AKs', 'AKo', 'AQs']
@@ -184,14 +250,14 @@ function getDefaultCharts(): GtoCharts {
         CO:  [...premiums, ...broadOpen, ...midOpen],
         BTN: [...premiums, ...broadOpen, ...midOpen, ...lateOpen],
         SB:  [...premiums, ...broadOpen, ...midOpen, ...lateOpen.slice(0, 15)],
-        BB:  [],  // BB defends to raises, not opening
+        BB:  [],
       },
       threebet_ranges: {
         UTG: threebetHands.slice(0, 6),
         MP:  threebetHands.slice(0, 8),
         HJ:  threebetHands.slice(0, 9),
         CO:  threebetHands,
-        BTN: [...threebetHands, 'A5s', 'A4s', 'A3s', 'A2s'],  // BTN polarised 3-bets
+        BTN: [...threebetHands, 'A5s', 'A4s', 'A3s', 'A2s'],
         SB:  threebetHands,
         BB:  [...threebetHands, 'A5s', 'A4s'],
       },
@@ -206,24 +272,9 @@ function getDefaultCharts(): GtoCharts {
       },
     },
     postflop: {
-      cbet_frequency: {
-        'dry': 0.65,
-        'rainbow': 0.55,
-        'two-tone': 0.45,
-        'monotone': 0.30,
-      },
-      check_raise_frequency: {
-        'dry': 0.15,
-        'rainbow': 0.20,
-        'two-tone': 0.25,
-        'monotone': 0.20,
-      },
-      fold_frequency: {
-        'dry': 0.35,
-        'rainbow': 0.40,
-        'two-tone': 0.45,
-        'monotone': 0.50,
-      },
+      cbet_frequency:        { dry: 0.65, rainbow: 0.55, 'two-tone': 0.45, monotone: 0.30, connected: 0.40 },
+      check_raise_frequency: { dry: 0.15, rainbow: 0.20, 'two-tone': 0.25, monotone: 0.20, connected: 0.22 },
+      fold_frequency:        { dry: 0.35, rainbow: 0.40, 'two-tone': 0.45, monotone: 0.50, connected: 0.42 },
     },
   }
 }
