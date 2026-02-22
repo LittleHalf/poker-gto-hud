@@ -4,6 +4,86 @@ import { getExploitAction } from '../engine/exploit.js'
 import { getStats } from '../db/stats.js'
 import { computeTag } from '../engine/stats.js'
 
+export interface ScreenshotAnalysis {
+  is_active_hand: boolean
+  is_hero_turn: boolean
+  street: string
+  hero_cards: string[]
+  board: string[]
+  pot_bb: number
+  stack_bb: number
+  hero_position: string
+  to_call_bb: number
+  action: string
+  sizing?: string
+  reasoning: string
+  confidence: number
+  gto_action?: string
+  exploit_action?: string
+}
+
+export async function analyzeScreenshot(
+  screenshot: string,
+  lambda: number,
+  manualCards?: string[]
+): Promise<ScreenshotAnalysis> {
+  const base64 = screenshot.replace(/^data:image\/\w+;base64,/, '')
+  const strategyMode = lambda < 0.2 ? 'Pure GTO' : lambda > 0.8 ? 'Max Exploit' : `Balanced GTO/Exploit (λ=${lambda.toFixed(2)})`
+  const manualNote = manualCards?.length ? `\nHero's cards are confirmed as: ${manualCards.join(' ')} (user-provided override).` : ''
+
+  const prompt = `You are an expert poker GTO coach with computer vision. Analyze this pokernow.com screenshot.${manualNote}
+
+Read DIRECTLY from the screenshot:
+- Hero's hole cards: the 2 face-up cards at the bottom of the table belonging to the player with action buttons (CALL/BET/FOLD/CHECK/RAISE visible), OR the bottom-center player
+- Community cards: cards dealt face-up in the CENTER of the table
+- Street: PREFLOP (no community cards), FLOP (3 cards), TURN (4 cards), RIVER (5 cards)
+- Pot: the number shown in the center of the table
+- Hero stack: the number shown under the hero's name/seat
+- Hero position: look for D or dealer chip (=BTN), SB/BB text near players, or infer from seat
+- To call: the number on the CALL button if visible (0 if check is available instead)
+- Is it hero's turn: action buttons (CALL/BET/FOLD/CHECK/RAISE) visible and active
+
+Strategy: ${strategyMode}
+
+If no cards are visible or it's between hands, set is_active_hand: false.
+
+Respond with ONLY raw JSON (no markdown, no code fences):
+{"is_active_hand":true,"is_hero_turn":true,"street":"PREFLOP","hero_cards":["Ah","Kd"],"board":[],"pot_bb":30,"stack_bb":960,"hero_position":"BTN","to_call_bb":20,"action":"RAISE","sizing":"2.5x","reasoning":"one sentence GTO reason","confidence":0.85,"gto_action":"RAISE 2.5x","exploit_action":"RAISE 2.5x"}`
+
+  try {
+    const resp = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 300,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } } as Anthropic.ImageBlockParam,
+          { type: 'text', text: prompt } as Anthropic.TextBlockParam,
+        ],
+      }],
+    })
+
+    const text = resp.content[0].type === 'text' ? resp.content[0].text.trim() : ''
+    const jsonText = text.replace(/^```(?:json)?|```$/gm, '').trim()
+    const parsed = JSON.parse(jsonText) as ScreenshotAnalysis
+
+    // If manual cards provided, override
+    if (manualCards?.length) parsed.hero_cards = manualCards
+
+    return parsed
+  } catch (err) {
+    console.error('[adviser] analyzeScreenshot failed:', err)
+    return {
+      is_active_hand: false, is_hero_turn: false,
+      street: 'PREFLOP', hero_cards: manualCards ?? [], board: [],
+      pot_bb: 0, stack_bb: 0, hero_position: 'UNKNOWN', to_call_bb: 0,
+      action: 'WAIT',
+      reasoning: `Claude Vision error: ${err instanceof Error ? err.message : String(err)}`,
+      confidence: 0,
+    }
+  }
+}
+
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 export interface GameState {

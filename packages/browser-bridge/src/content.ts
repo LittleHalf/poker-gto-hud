@@ -1,4 +1,6 @@
-// Content script — injected into pokernow.com game tabs
+// Content script — pokernow.com
+// Primary data source: screenshot sent to Claude Vision every 2.5s
+// DOM scraping only used for: action log (opponent stats) + chat context
 
 interface GameEvent {
   type: string
@@ -6,35 +8,33 @@ interface GameEvent {
   payload: Record<string, unknown>
 }
 
-interface GameState {
+interface AnalysisResult {
+  is_active_hand: boolean
+  is_hero_turn: boolean
   street: string
-  hero_position: string
   hero_cards: string[]
   board: string[]
   pot_bb: number
-  to_call_bb: number
   stack_bb: number
-  villains: Array<{ player_id: string; position: string; stack_bb: number }>
-  action_history: string[]
-}
-
-interface Decision {
+  hero_position: string
+  to_call_bb: number
   action: string
   sizing?: string
   reasoning: string
   confidence: number
+  gto_action?: string
+  exploit_action?: string
 }
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
 const HUD_ID = 'pgtohud-overlay'
 let currentLambda = 0.5
-let isWaitingForDecision = false
-let lastDecisionState = ''
-let currentGameState: GameState | null = null
+let lastAnalysis: AnalysisResult | null = null
 let currentRecommendation = ''
 let isWaitingForChat = false
-let manualCards: string[] = []  // user-entered override
+let manualCards: string[] = []
+let isAnalyzing = false
 
 // ── HUD ───────────────────────────────────────────────────────────────────────
 
@@ -49,14 +49,20 @@ function injectHUD(): void {
     #pgtohud-dot.connected { color:#22c55e; }
     #pgtohud-dot.thinking  { color:#f59e0b;animation:pgtopulse 1s infinite; }
     @keyframes pgtopulse { 0%,100%{opacity:1} 50%{opacity:.3} }
-    #pgtohud-header button { background:none;border:none;cursor:pointer;font-size:12px;padding:2px 5px;border-radius:3px;color:#666; }
-    #pgtohud-header button:hover { color:#fff;background:rgba(255,255,255,.1); }
-    #pgtohud-min { margin-left:auto; }
+    #pgtohud-header button { background:none;border:none;cursor:pointer;padding:2px 5px;border-radius:3px;line-height:1; }
+    #pgtohud-analyze { font-size:13px;color:#22c55e;font-weight:bold; }
+    #pgtohud-analyze:hover { background:rgba(34,197,94,0.15); }
+    #pgtohud-analyze:disabled { color:#333;cursor:not-allowed; }
+    #pgtohud-chat-btn { font-size:12px;color:#60a5fa; }
+    #pgtohud-chat-btn:hover { background:rgba(96,165,250,0.15); }
+    #pgtohud-min { margin-left:auto;color:#555;font-size:14px; }
+    #pgtohud-min:hover { color:#fff; }
     #pgtohud-body { padding:8px 10px; }
     #pgtohud-status { color:#666;font-size:10px;margin-bottom:2px; }
-    #pgtohud-detected { color:#3b5a7a;font-size:9px;font-family:monospace;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
-    #pgtohud-action { font-size:20px;font-weight:700;color:#22c55e;margin:4px 0;min-height:26px; }
-    #pgtohud-reasoning { font-size:11px;color:#aaa;line-height:1.4;margin-bottom:6px;min-height:16px; }
+    #pgtohud-detected { color:#2d5a7a;font-size:9px;font-family:monospace;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+    #pgtohud-action { font-size:22px;font-weight:700;color:#22c55e;margin:4px 0;min-height:28px; }
+    #pgtohud-reasoning { font-size:11px;color:#aaa;line-height:1.4;margin-bottom:4px;min-height:14px; }
+    #pgtohud-sub { font-size:10px;color:#555;margin-bottom:5px; }
     #pgtohud-villain { font-size:10px;color:#6b8cad;border-top:1px solid #1e3a5f;padding-top:5px;margin-bottom:5px;min-height:14px;line-height:1.5; }
     #pgtohud-lambda-row { display:flex;align-items:center;gap:6px;font-size:10px;color:#555; }
     #pgtohud-slider { flex:1;height:3px;accent-color:#1d4ed8;cursor:pointer; }
@@ -64,7 +70,7 @@ function injectHUD(): void {
     #pgtohud-manual-row { display:flex;gap:3px;margin-bottom:5px; }
     #pgtohud-manual-input { flex:1;background:#0d1b2a;border:1px solid #1e3a5f;border-radius:4px;color:#e0e0e0;font-size:10px;padding:3px 6px;outline:none; }
     #pgtohud-manual-input:focus { border-color:#f59e0b; }
-    #pgtohud-manual-set, #pgtohud-manual-clear { background:#1e3a5f;border:none;color:#aaa;border-radius:4px;padding:3px 7px;cursor:pointer;font-size:10px; }
+    #pgtohud-manual-set,#pgtohud-manual-clear { background:#1e3a5f;border:none;color:#aaa;border-radius:4px;padding:3px 7px;cursor:pointer;font-size:10px; }
     #pgtohud-manual-set:hover { background:#1d4ed8;color:#fff; }
     #pgtohud-manual-clear:hover { background:#7f1d1d;color:#fff; }
     #pgtohud-chat { display:none;border-top:1px solid #1e3a5f;padding-top:6px;margin-top:4px; }
@@ -89,15 +95,16 @@ function injectHUD(): void {
   el.innerHTML = `
     <div id="pgtohud-header">
       <span id="pgtohud-dot">●</span> GTO HUD
-      <button id="pgtohud-analyze" title="Analyze now">▶</button>
+      <button id="pgtohud-analyze" title="Analyze now (also runs every 2.5s)">▶</button>
       <button id="pgtohud-chat-btn" title="Chat with Claude">💬</button>
       <span id="pgtohud-min" title="Minimize">─</span>
     </div>
     <div id="pgtohud-body">
-      <div id="pgtohud-status">Watching table...</div>
+      <div id="pgtohud-status">Starting...</div>
       <div id="pgtohud-detected"></div>
       <div id="pgtohud-action"></div>
       <div id="pgtohud-reasoning"></div>
+      <div id="pgtohud-sub"></div>
       <div id="pgtohud-villain"></div>
       <div id="pgtohud-lambda-row">
         <span>GTO</span>
@@ -106,7 +113,7 @@ function injectHUD(): void {
       </div>
       <div id="pgtohud-lambda-label">λ = 0.50 · Balanced</div>
       <div id="pgtohud-manual-row">
-        <input type="text" id="pgtohud-manual-input" placeholder="Manual cards: Ah Kd"/>
+        <input type="text" id="pgtohud-manual-input" placeholder="Override cards: Ah Kd"/>
         <button id="pgtohud-manual-set">Set</button>
         <button id="pgtohud-manual-clear" style="display:none">✕</button>
       </div>
@@ -140,27 +147,20 @@ function injectHUD(): void {
     chrome.runtime.sendMessage({ type: 'SET_LAMBDA', lambda: currentLambda })
   })
 
-  // Analyze button
+  // ▶ Analyze now
   document.getElementById('pgtohud-analyze')!.addEventListener('click', () => {
-    lastDecisionState = ''
-    isWaitingForDecision = false
-    triggerDecision()
+    requestAnalysis()
   })
 
-  // Manual card input
+  // Manual card override
   document.getElementById('pgtohud-manual-set')!.addEventListener('click', () => {
     const inp = document.getElementById('pgtohud-manual-input') as HTMLInputElement
-    const raw = inp.value.trim()
-    if (!raw) return
-    // Parse space-separated cards like "Ah Kd" or "Ah, Kd"
-    const cards = raw.split(/[\s,]+/).map(c => c.trim()).filter(c => /^[AKQJTakqjt2-9]{1,2}[shdcSHDC♠♥♦♣]$/.test(c))
-    if (cards.length < 2) { setHudStatus('Invalid cards — try e.g. Ah Kd'); return }
+    const cards = inp.value.trim().split(/[\s,]+/).filter(c => /^[AKQJTakqjt2-9]{1,2}[shdcSHDC]$/.test(c))
+    if (cards.length < 2) { setStatus('Invalid — try e.g. Ah Kd'); return }
     manualCards = cards
     document.getElementById('pgtohud-manual-clear')!.style.display = 'inline'
-    setHudStatus(`Manual: ${cards.join(' ')} — press ▶ to analyze`)
-    lastDecisionState = ''
-    isWaitingForDecision = false
-    triggerDecision()
+    setStatus(`Manual cards set: ${cards.join(' ')}`)
+    requestAnalysis()
   })
   document.getElementById('pgtohud-manual-input')!.addEventListener('keydown', (e: Event) => {
     if ((e as KeyboardEvent).key === 'Enter') document.getElementById('pgtohud-manual-set')?.click()
@@ -169,7 +169,7 @@ function injectHUD(): void {
     manualCards = []
     ;(document.getElementById('pgtohud-manual-input') as HTMLInputElement).value = ''
     document.getElementById('pgtohud-manual-clear')!.style.display = 'none'
-    setHudStatus('Manual cards cleared')
+    setStatus('Manual override cleared')
   })
 
   // Chat toggle
@@ -193,7 +193,17 @@ function injectHUD(): void {
     chrome.runtime.sendMessage({
       type: 'CHAT_REQUEST',
       question: q,
-      game_state: currentGameState,
+      game_state: lastAnalysis ? {
+        street: lastAnalysis.street,
+        hero_cards: lastAnalysis.hero_cards,
+        board: lastAnalysis.board,
+        pot_bb: lastAnalysis.pot_bb,
+        stack_bb: lastAnalysis.stack_bb,
+        hero_position: lastAnalysis.hero_position,
+        to_call_bb: lastAnalysis.to_call_bb,
+        villains: [],
+        action_history: [],
+      } : undefined,
       current_recommendation: currentRecommendation,
       lambda: currentLambda,
     })
@@ -204,6 +214,7 @@ function injectHUD(): void {
   })
 
   setDot('connected')
+  setStatus('Ready — scanning every 2.5s')
 }
 
 function makeDraggable(el: HTMLElement, handle: HTMLElement): void {
@@ -212,272 +223,107 @@ function makeDraggable(el: HTMLElement, handle: HTMLElement): void {
     e.preventDefault()
     ox = e.clientX - el.getBoundingClientRect().left
     oy = e.clientY - el.getBoundingClientRect().top
-    const move = (e2: MouseEvent) => { el.style.left = `${e2.clientX - ox}px`; el.style.top = `${e2.clientY - oy}px`; el.style.right = 'auto' }
-    const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up) }
+    const move = (e2: MouseEvent) => { el.style.left=`${e2.clientX-ox}px`; el.style.top=`${e2.clientY-oy}px`; el.style.right='auto' }
+    const up = () => { document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up) }
     document.addEventListener('mousemove', move)
     document.addEventListener('mouseup', up)
   })
 }
 
-function setDot(s: 'connected' | 'thinking' | 'idle'): void {
+function setDot(s: 'connected'|'thinking'|'idle'): void {
   const d = document.getElementById('pgtohud-dot')
   if (d) d.className = s === 'connected' ? 'connected' : s === 'thinking' ? 'thinking' : ''
 }
-
-function setHudStatus(msg: string): void {
-  const el = document.getElementById('pgtohud-status')
-  if (el) el.textContent = msg
+function setStatus(msg: string): void {
+  const el = document.getElementById('pgtohud-status'); if (el) el.textContent = msg
 }
-
-function setDetected(state: GameState | null): void {
-  const el = document.getElementById('pgtohud-detected')
-  if (!el) return
-  el.textContent = state ? `${state.hero_cards.join(' ')} | ${state.street} | pot ${state.pot_bb}bb | stack ${state.stack_bb}bb` : ''
-}
-
-function showDecision(d: Decision, lambda: number): void {
-  isWaitingForDecision = false
-  setDot('connected')
-  currentRecommendation = d.sizing ? `${d.action} ${d.sizing}` : d.action
-  const color = d.action === 'FOLD' ? '#ef4444' : (d.action === 'RAISE' || d.action === 'BET') ? '#f59e0b' : '#22c55e'
-  const actionEl = document.getElementById('pgtohud-action')
-  const reasonEl = document.getElementById('pgtohud-reasoning')
-  if (actionEl) { actionEl.style.color = color; actionEl.textContent = currentRecommendation }
-  if (reasonEl) reasonEl.textContent = d.reasoning.slice(0, 140)
-  setHudStatus(`λ=${lambda.toFixed(2)} · conf ${Math.round((d.confidence ?? 0.5) * 100)}%`)
-  updateLambdaLabel()
-}
-
-function showVillain(profile: Record<string, unknown>): void {
-  const el = document.getElementById('pgtohud-villain')
-  if (!el) return
-  const stats = profile.stats as Record<string, unknown> | null
-  if (!stats) { el.textContent = ''; return }
-  const pct = (v: unknown) => (v != null) ? `${(Number(v) * 100).toFixed(0)}%` : '?'
-  el.innerHTML = `<strong>${profile.name ?? '?'} [${profile.tag ?? '?'}]</strong><br/>VPIP ${pct(stats.vpip)} · PFR ${pct(stats.pfr)} · AF ${stats.af != null ? Number(stats.af).toFixed(1) : '?'}<br/>F/3b ${pct(stats.fold_to_3bet)} · F/Cb ${pct(stats.fold_to_cbet)} · n=${stats.sample_size}`
-}
-
 function updateLambdaLabel(): void {
   const el = document.getElementById('pgtohud-lambda-label')
-  if (el) el.textContent = `λ = ${currentLambda.toFixed(2)} · ${currentLambda < 0.2 ? 'Pure GTO' : currentLambda > 0.8 ? 'Max Exploit' : 'Balanced'}`
+  if (el) el.textContent = `λ = ${currentLambda.toFixed(2)} · ${currentLambda<0.2?'Pure GTO':currentLambda>0.8?'Max Exploit':'Balanced'}`
 }
-
-function addMsg(type: 'user' | 'bot' | 'wait', text: string): void {
-  const msgsEl = document.getElementById('pgtohud-msgs')
-  if (!msgsEl) return
+function addMsg(type: 'user'|'bot'|'wait', text: string): void {
+  const el = document.getElementById('pgtohud-msgs'); if (!el) return
   const div = document.createElement('div')
-  div.className = type === 'user' ? 'pgto-user' : type === 'wait' ? 'pgto-wait' : 'pgto-bot'
+  div.className = type==='user'?'pgto-user':type==='wait'?'pgto-wait':'pgto-bot'
   div.textContent = text
-  msgsEl.appendChild(div)
-  msgsEl.scrollTop = msgsEl.scrollHeight
+  el.appendChild(div); el.scrollTop = el.scrollHeight
 }
-
 function showSuggestions(suggestions: string[]): void {
-  const el = document.getElementById('pgtohud-suggestions')
-  if (!el) return
+  const el = document.getElementById('pgtohud-suggestions'); if (!el) return
   el.innerHTML = ''
-  for (const s of suggestions.slice(0, 3)) {
+  for (const s of suggestions.slice(0,3)) {
     const chip = document.createElement('span')
-    chip.className = 'pgto-sugg'
-    chip.textContent = s
-    chip.addEventListener('click', () => {
-      ;(document.getElementById('pgtohud-input') as HTMLInputElement).value = s
-      document.getElementById('pgtohud-send')?.click()
-    })
+    chip.className='pgto-sugg'; chip.textContent=s
+    chip.addEventListener('click',()=>{ (document.getElementById('pgtohud-input') as HTMLInputElement).value=s; document.getElementById('pgtohud-send')?.click() })
     el.appendChild(chip)
   }
 }
 
-// ── Game state extraction ─────────────────────────────────────────────────────
+function showAnalysis(result: AnalysisResult): void {
+  setDot('connected')
+  isAnalyzing = false
+  ;(document.getElementById('pgtohud-analyze') as HTMLButtonElement).disabled = false
 
-function parseCard(el: Element): string {
-  const rank = el.getAttribute('data-rank')
-  const suit = el.getAttribute('data-suit')
-  if (rank && suit) return `${rank}${suit}`
-  const cls = el.className || ''
-  const rm = cls.match(/rank[-_]([AKQJT2-9]{1,2})/i)
-  const sm = cls.match(/suit[-_]([shdc])/i)
-  if (rm && sm) return `${rm[1].toUpperCase()}${sm[1].toLowerCase()}`
-  const txt = el.textContent?.trim() ?? ''
-  if (/^[AKQJT2-9]{1,2}[shdc♠♥♦♣]$/i.test(txt)) {
-    return txt.replace('♠','s').replace('♥','h').replace('♦','d').replace('♣','c')
-  }
-  return '??'
-}
-
-function parseStack(el: Element | null): number {
-  return parseFloat(el?.textContent?.replace(/[^0-9.]/g, '') ?? '0') || 0
-}
-
-function readStack(heroEl: Element | null): number {
-  if (!heroEl) return 0
-
-  // 1. Try known class-name selectors
-  const selectors = [
-    '.table-player-stack',
-    '.stack-value',
-    '.player-stack',
-    '[class*="stack"]',
-    '[class*="chips"] [class*="value"]',
-    '[class*="chips"] [class*="main"]',
-    '[class*="balance"]',
-    '[class*="amount"]',
-  ]
-  for (const sel of selectors) {
-    const el = heroEl.querySelector(sel)
-    const val = parseStack(el)
-    if (val > 0) return val
+  if (!result.is_active_hand) {
+    setStatus('Waiting for hand...')
+    const a = document.getElementById('pgtohud-action'); if (a) { a.textContent=''; a.style.color='#22c55e' }
+    const r = document.getElementById('pgtohud-reasoning'); if (r) r.textContent=''
+    document.getElementById('pgtohud-detected')!.textContent = ''
+    return
   }
 
-  // 2. Scan all leaf text nodes inside hero element for the largest plausible chip count
-  // pokernow.com often renders "PlayerName\n960" inside the seat element
-  const candidates: number[] = []
-  const walker = document.createTreeWalker(heroEl, NodeFilter.SHOW_TEXT)
-  let node: Text | null
-  while ((node = walker.nextNode() as Text)) {
-    const text = node.textContent?.trim() ?? ''
-    // Match standalone numbers (chip counts are typically 10–999999)
-    const match = text.match(/^(\d{2,7})$/)
-    if (match) {
-      const n = parseFloat(match[1])
-      if (n >= 10 && n <= 999999) candidates.push(n)
-    }
-  }
-  // Return the largest number found (stack > antes/blinds shown)
-  if (candidates.length > 0) return Math.max(...candidates)
+  // Update detected state line
+  const cards = result.hero_cards.join(' ') || '?'
+  const board = result.board.length ? result.board.join(' ') : '-'
+  document.getElementById('pgtohud-detected')!.textContent =
+    `${cards} | ${board} | ${result.street} | pot ${result.pot_bb}bb | stack ${result.stack_bb}bb | ${result.hero_position}`
 
-  // 3. Last resort: grab all text from the hero element and find the biggest number
-  const allText = heroEl.textContent ?? ''
-  const nums = [...allText.matchAll(/\b(\d{2,7})\b/g)]
-    .map(m => parseFloat(m[1]))
-    .filter(n => n >= 10 && n <= 999999)
-  if (nums.length > 0) return Math.max(...nums)
+  // Action
+  currentRecommendation = result.sizing ? `${result.action} ${result.sizing}` : result.action
+  const color = result.action==='FOLD'?'#ef4444':(result.action==='RAISE'||result.action==='BET')?'#f59e0b':'#22c55e'
+  const actionEl = document.getElementById('pgtohud-action')!
+  actionEl.style.color = color
+  actionEl.textContent = currentRecommendation
 
-  return 0
-}
+  document.getElementById('pgtohud-reasoning')!.textContent = result.reasoning.slice(0, 150)
 
-function findHeroEl(): Element | null {
-  return document.querySelector('.table-player.main-player')
-    ?? document.querySelector('.table-player[data-you="true"]')
-    ?? document.querySelector('.table-player.you')
-    ?? document.querySelector('[class*="hero-player"]')
-    ?? null
-}
+  const sub = []
+  if (result.gto_action) sub.push(`GTO: ${result.gto_action}`)
+  if (result.exploit_action) sub.push(`Exploit: ${result.exploit_action}`)
+  sub.push(`conf ${Math.round((result.confidence??0.5)*100)}%`)
+  document.getElementById('pgtohud-sub')!.textContent = sub.join(' · ')
 
-function findCards(container: Element | null): string[] {
-  if (!container) return []
-  for (const sel of ['.card:not(.card-back)', '[class*="card"]:not([class*="back"])', '.playing-card']) {
-    const cards = [...container.querySelectorAll(sel)].map(parseCard).filter(c => c !== '??' && c.length >= 2)
-    if (cards.length) return cards
-  }
-  return []
-}
-
-function extractGameState(): GameState | null {
-  const heroEl = findHeroEl()
-
-  // Hero cards
-  let heroCards = heroEl ? findCards(heroEl) : []
-  if (!heroCards.length) {
-    for (const sel of ['.my-cards', '.hero-cards', '.hole-cards', '.player-cards-zone.main',
-                        '.table-player.main-player .player-cards-zone']) {
-      const c = findCards(document.querySelector(sel))
-      if (c.length) { heroCards = c; break }
-    }
-  }
-  // Manual override wins over DOM scraping
-  if (manualCards.length >= 2) heroCards = manualCards
-
-  if (!heroCards.length) { setDetected(null); return null }
-
-  // Board
-  let board: string[] = []
-  for (const sel of ['.community-cards .card:not(.card-back)', '.board-cards .card:not(.card-back)',
-                      '.board .card:not(.card-back)', '.table-cards .card:not(.card-back)',
-                      '[class*="community"] .card:not(.card-back)', '[class*="board"] [class*="card"]:not([class*="back"])']) {
-    const cards = [...document.querySelectorAll(sel)].map(parseCard).filter(c => c !== '??' && c.length >= 2)
-    if (cards.length) { board = cards; break }
-  }
-
-  const street = board.length === 0 ? 'PREFLOP' : board.length === 3 ? 'FLOP' : board.length === 4 ? 'TURN' : 'RIVER'
-
-  // Pot
-  let pot_bb = 0
-  for (const sel of ['.main-pot-value','.pot-value','.total-pot','.pot-amount','[class*="pot"] [class*="value"]']) {
-    const el = document.querySelector(sel)
-    if (el) { pot_bb = parseStack(el); break }
-  }
-
-  // Call amount
-  let to_call_bb = 0
-  for (const sel of ['button.call','button[class*="call"]','[class*="call-button"]','.action-button.call','[data-action="call"]']) {
-    const btn = document.querySelector(sel)
-    if (btn) { to_call_bb = parseFloat(btn.textContent?.replace(/[^0-9.]/g, '') ?? '0') || 0; break }
-  }
-
-  // Hero stack — try explicit selectors, then scan all numeric text in hero element
-  const stack_bb = readStack(heroEl)
-
-  // Position — try data attribute, then text label, then seat-index estimate
-  let hero_position = 'BTN'  // default to BTN (most playable range) when unknown
-  const posAttr = heroEl?.getAttribute('data-position')
-  if (posAttr && !/^\d+$/.test(posAttr)) {
-    hero_position = posAttr.toUpperCase()
+  if (result.is_hero_turn) {
+    setStatus(`Your turn · λ=${currentLambda.toFixed(2)}`)
   } else {
-    // Look for position text label inside or near the hero element
-    const posLabel = heroEl?.querySelector('[class*="position"],[class*="dealer"],[class*="blind"],[class*="role"]')
-    const labelText = posLabel?.textContent?.trim().toUpperCase()
-    if (labelText && ['BTN','SB','BB','UTG','MP','HJ','CO','D','BUTTON'].includes(labelText)) {
-      hero_position = labelText === 'D' || labelText === 'BUTTON' ? 'BTN' : labelText
-    } else {
-      // Seat-index heuristic: rotate through named positions
-      const seats = [...document.querySelectorAll('.table-player')]
-      const idx = seats.indexOf(heroEl as HTMLElement)
-      const posNames = ['BTN','SB','BB','UTG','MP','HJ','CO']
-      hero_position = posNames[idx % posNames.length] ?? 'BTN'
-    }
+    setStatus(`Watching · ${result.street}`)
   }
 
-  // Villains
-  const villains: GameState['villains'] = []
-  document.querySelectorAll('.table-player').forEach((seat, idx) => {
-    if (seat === heroEl) return
-    const nameEl = seat.querySelector('.table-player-name,.username,[class*="player-name"],[class*="username"]')
-    const name = nameEl?.textContent?.trim()
-    if (!name) return
-    villains.push({
-      player_id: btoa(name).replace(/[+/=]/g, ''),
-      position: seat.getAttribute('data-position')?.toUpperCase() ?? `SEAT_${idx}`,
-      stack_bb: readStack(seat),
-    })
-  })
-
-  // Detect street change — reset gate so re-analysis fires on new street
-  const newStreet = street
-  if (currentGameState && currentGameState.street !== newStreet) {
-    lastDecisionState = ''
-  }
-
-  // Action history from game log
-  const action_history: string[] = []
-  for (const sel of ['.log-entry','.game-log-entry','[class*="log-entry"]','.timeline-entry']) {
-    const entries = [...document.querySelectorAll(sel)]
-    if (entries.length) {
-      action_history.push(...entries.slice(-10).map(e => e.textContent?.trim() ?? '').filter(Boolean))
-      break
-    }
-  }
-
-  const state: GameState = { street, hero_position, hero_cards: heroCards, board, pot_bb, to_call_bb, stack_bb, villains, action_history }
-  currentGameState = state
-  setDetected(state)
-  return state
+  lastAnalysis = result
 }
 
-// ── Event sending ─────────────────────────────────────────────────────────────
+function showVillain(profile: Record<string, unknown>): void {
+  const el = document.getElementById('pgtohud-villain'); if (!el) return
+  const stats = profile.stats as Record<string,unknown>|null
+  if (!stats) { el.textContent=''; return }
+  const pct = (v: unknown) => v!=null ? `${(Number(v)*100).toFixed(0)}%` : '?'
+  el.innerHTML = `<strong>${profile.name??'?'} [${profile.tag??'?'}]</strong><br/>VPIP ${pct(stats.vpip)} · PFR ${pct(stats.pfr)} · AF ${stats.af!=null?Number(stats.af).toFixed(1):'?'}<br/>F/3b ${pct(stats.fold_to_3bet)} · F/Cb ${pct(stats.fold_to_cbet)} · n=${stats.sample_size}`
+}
 
-function sendEvent(event: GameEvent): void {
-  chrome.runtime.sendMessage({ type: 'GAME_EVENT', event })
+// ── Screenshot analysis trigger ───────────────────────────────────────────────
+
+function requestAnalysis(): void {
+  if (isAnalyzing) return
+  isAnalyzing = true
+  setDot('thinking')
+  setStatus('Analyzing...')
+  ;(document.getElementById('pgtohud-analyze') as HTMLButtonElement).disabled = true
+
+  chrome.runtime.sendMessage({
+    type: 'SCREENSHOT_TICK',
+    lambda: currentLambda,
+    manual_cards: manualCards.length >= 2 ? manualCards : undefined,
+  })
 }
 
 // ── Opponent action tracking ──────────────────────────────────────────────────
@@ -485,127 +331,49 @@ function sendEvent(event: GameEvent): void {
 const seenLogEntries = new Set<string>()
 
 function scanActionLog(): void {
-  // Try specific selectors first, then fall back to broad text search
-  const specificSelectors = [
-    '.log-entry', '.game-log-entry', '[class*="log-entry"]',
-    '.timeline-entry', '[class*="timeline"]', '[class*="game-log"]',
-    '[class*="action-log"]', '[class*="hand-history"]', '[class*="chat"] li',
-    '[class*="message-item"]', '[class*="msg-item"]',
-  ]
-
+  const selectors = ['.log-entry','.game-log-entry','[class*="log-entry"]','.timeline-entry','[class*="timeline"]','[class*="game-log"]']
   const found: Element[] = []
-  for (const sel of specificSelectors) {
+  for (const sel of selectors) {
     const els = [...document.querySelectorAll(sel)]
-    if (els.length > 0) { found.push(...els); break }
+    if (els.length) { found.push(...els); break }
   }
-
-  // Broad fallback: any short text node containing poker action words
-  if (found.length === 0) {
-    document.querySelectorAll('p, span, div, li').forEach(el => {
-      const text = el.textContent?.trim() ?? ''
-      if (text.length > 5 && text.length < 100 &&
-          /\b(raises?|calls?|checks?|folds?|bets?)\b/i.test(text) &&
-          el.children.length === 0) {
-        found.push(el)
-      }
+  if (!found.length) {
+    document.querySelectorAll('p,span,div,li').forEach(el => {
+      const text = el.textContent?.trim()??''
+      if (text.length>5&&text.length<100&&/\b(raises?|calls?|checks?|folds?|bets?)\b/i.test(text)&&el.children.length===0) found.push(el)
     })
   }
-
   for (const entry of found) {
-    const text = entry.textContent?.trim() ?? ''
-    if (!text || seenLogEntries.has(text)) continue
+    const text = entry.textContent?.trim()??''
+    if (!text||seenLogEntries.has(text)) continue
     seenLogEntries.add(text)
     const m = text.match(/^(.+?)\s+(raises?|calls?|checks?|folds?|bets?)/i)
     if (!m) continue
-    const [, playerName, rawAction] = m
-    const amount = parseFloat(text.match(/(\d+(?:\.\d+)?)\s*$/)?.[1] ?? '0') || 0
-    sendEvent({
-      type: 'ACTION',
-      timestamp: Date.now(),
-      payload: {
-        player_id: btoa(playerName.trim()).replace(/[+/=]/g, ''),
-        player_name: playerName.trim(),
-        action: rawAction.toLowerCase().replace(/s$/, ''),
-        amount,
+    const [,playerName,rawAction] = m
+    const amount = parseFloat(text.match(/(\d+(?:\.\d+)?)\s*$/)?.[1]??'0')||0
+    chrome.runtime.sendMessage({
+      type: 'GAME_EVENT',
+      event: {
+        type: 'ACTION',
+        timestamp: Date.now(),
+        payload: { player_id: btoa(playerName.trim()).replace(/[+/=]/g,''), player_name: playerName.trim(), action: rawAction.toLowerCase().replace(/s$/,''), amount },
       },
     })
   }
 }
 
-// ── Decision trigger ──────────────────────────────────────────────────────────
-
-let decisionDebounce: ReturnType<typeof setTimeout> | null = null
-
-function triggerDecision(): void {
-  if (isWaitingForDecision) return
-  if (decisionDebounce) clearTimeout(decisionDebounce)
-  decisionDebounce = setTimeout(() => {
-    const state = extractGameState()
-    if (!state) { setHudStatus('No cards detected — press ▶ to retry'); return }
-    const key = JSON.stringify([state.hero_cards, state.board, state.to_call_bb])
-    if (key === lastDecisionState) return
-    lastDecisionState = key
-    isWaitingForDecision = true
-    setDot('thinking')
-    setHudStatus('Solving...')
-    const a = document.getElementById('pgtohud-action'); if (a) a.textContent = ''
-    const r = document.getElementById('pgtohud-reasoning'); if (r) r.textContent = ''
-    chrome.runtime.sendMessage({ type: 'REQUEST_DECISION', game_state: state })
-    if (state.villains.length > 0) {
-      chrome.runtime.sendMessage({ type: 'LOOKUP_VILLAIN', player_id: state.villains[0].player_id })
-    }
-  }, 300)
-}
-
-// ── DOM observer ─────────────────────────────────────────────────────────────
-
-const ACTION_SELECTORS = [
-  '.action-buttons','.player-actions-wrap','.game-table-action-buttons',
-  '.game-player-actions-container','[class*="action-buttons"]','[class*="actions-wrap"]',
-]
-
-function isActionBarVisible(): boolean {
-  for (const sel of ACTION_SELECTORS) {
-    const bar = document.querySelector(sel)
-    if (!bar) continue
-    const s = getComputedStyle(bar as HTMLElement)
-    if ((bar as HTMLElement).offsetParent !== null && s.display !== 'none' && s.visibility !== 'hidden') {
-      return true
-    }
-  }
-  return false
-}
-
-const observer = new MutationObserver(() => {
-  scanActionLog()
-  // Re-trigger whenever action bar is visible — triggerDecision uses lastDecisionState
-  // to deduplicate, so this is safe to call on every mutation
-  if (isActionBarVisible() && !isWaitingForDecision) {
-    triggerDecision()
-  }
-})
-
-// Periodic live refresh — catches cases the observer misses (e.g. street changes
-// where the action bar element updates in-place without being re-added to the DOM)
-setInterval(() => {
-  if (isActionBarVisible() && !isWaitingForDecision) {
-    triggerDecision()
-  }
-}, 2500)
-
 // ── Incoming messages ─────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((message) => {
-  if (message.type === 'DECISION_RESULT') {
-    showDecision(message.decision as Decision, message.lambda as number)
+  if (message.type === 'ANALYSIS_RESULT') {
+    showAnalysis(message.result as AnalysisResult)
   }
   if (message.type === 'VILLAIN_PROFILE') {
-    showVillain(message.profile as Record<string, unknown>)
+    showVillain(message.profile as Record<string,unknown>)
   }
   if (message.type === 'CHAT_RESPONSE') {
     isWaitingForChat = false
     ;(document.getElementById('pgtohud-send') as HTMLButtonElement).disabled = false
-    // Remove thinking message
     const msgsEl = document.getElementById('pgtohud-msgs')
     const waiting = msgsEl?.querySelector('.pgto-wait')
     if (waiting) msgsEl!.removeChild(waiting)
@@ -619,17 +387,20 @@ chrome.runtime.onMessage.addListener((message) => {
 
 function init(): void {
   injectHUD()
-  observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class','style','data-position'] })
+
+  // Unconditional 2.5s screenshot ticker — no conditions, always fires
+  setInterval(requestAnalysis, 2500)
+
+  // Observe DOM for opponent action log updates
+  new MutationObserver(scanActionLog).observe(document.body, {
+    childList: true, subtree: true,
+  })
   scanActionLog()
 
-  const players = [...document.querySelectorAll('.table-player')].map((seat, idx) => {
-    const name = seat.querySelector('.table-player-name,.username,[class*="player-name"]')?.textContent?.trim() ?? `P${idx}`
-    return { id: btoa(name).replace(/[+/=]/g, ''), name, position: seat.getAttribute('data-position')?.toUpperCase() ?? `SEAT_${idx}` }
-  }).filter(p => p.name)
-  if (players.length) sendEvent({ type: 'PLAYER_JOIN', timestamp: Date.now(), payload: { players } })
+  // Initial analysis after a short delay
+  setTimeout(requestAnalysis, 1000)
 
-  setTimeout(triggerDecision, 800)
-  console.log('[Poker GTO HUD] Loaded.')
+  console.log('[Poker GTO HUD] Loaded. Screenshot analysis every 2.5s.')
 }
 
 if (document.readyState === 'loading') {

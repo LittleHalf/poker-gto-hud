@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { monitorStart } from './src/tools/monitor.js'
 import { handIngest } from './src/tools/ingest.js'
 import { dbLookup } from './src/tools/lookup.js'
-import { adviserGetDecision } from './src/tools/adviser.js'
+import { adviserGetDecision, analyzeScreenshot } from './src/tools/adviser.js'
 import { sessionSummary } from './src/tools/session.js'
 import { handChat, getChatHistory } from './src/tools/chat.js'
 
@@ -194,6 +194,7 @@ server.app.options('/ingest',  preflight)
 server.app.options('/decide',  preflight)
 server.app.options('/lookup',  preflight)
 server.app.options('/chat',    preflight)
+server.app.options('/analyze', preflight)
 
 server.app.post('/monitor', async (c) => {
   const { source_url } = await c.req.json<{ source_url: string }>()
@@ -224,6 +225,13 @@ server.app.post('/chat', async (c) => {
     await c.req.json<{ question: string; game_state?: Parameters<typeof handChat>[1]['game_state']; current_recommendation?: string; lambda?: number; session_id?: string }>()
   const history = session_id ? await getChatHistory(session_id, 10) : []
   const result = await handChat(question, { game_state, current_recommendation, lambda, session_id }, history)
+  return c.json(JSON.parse(JSON.stringify(result)))
+})
+
+server.app.post('/analyze', async (c) => {
+  const { screenshot, lambda = 0.5, manual_cards } =
+    await c.req.json<{ screenshot: string; lambda?: number; manual_cards?: string[] }>()
+  const result = await analyzeScreenshot(screenshot, lambda, manual_cards)
   return c.json(JSON.parse(JSON.stringify(result)))
 })
 
