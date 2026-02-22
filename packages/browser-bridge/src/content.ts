@@ -341,12 +341,14 @@ function requestAnalysis(): void {
     type: 'SCREENSHOT_TICK',
     lambda: currentLambda,
     manual_cards: manualCards.length >= 2 ? manualCards : undefined,
+    action_history: actionHistory.slice(-12),
   })
 }
 
 // ── Opponent action tracking ──────────────────────────────────────────────────
 
 const seenLogEntries = new Set<string>()
+const actionHistory: string[] = []   // rolling last-20 actions for context
 
 function scanActionLog(): void {
   const selectors = ['.log-entry','.game-log-entry','[class*="log-entry"]','.timeline-entry','[class*="timeline"]','[class*="game-log"]']
@@ -369,6 +371,11 @@ function scanActionLog(): void {
     if (!m) continue
     const [,playerName,rawAction] = m
     const amount = parseFloat(text.match(/(\d+(?:\.\d+)?)\s*$/)?.[1]??'0')||0
+
+    // Keep rolling action history for context
+    actionHistory.push(text)
+    if (actionHistory.length > 20) actionHistory.shift()
+
     chrome.runtime.sendMessage({
       type: 'GAME_EVENT',
       event: {

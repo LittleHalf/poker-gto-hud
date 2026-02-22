@@ -25,30 +25,59 @@ export interface ScreenshotAnalysis {
 export async function analyzeScreenshot(
   screenshot: string,
   lambda: number,
-  manualCards?: string[]
+  manualCards?: string[],
+  actionHistory?: string[]
 ): Promise<ScreenshotAnalysis> {
   const base64 = screenshot.replace(/^data:image\/\w+;base64,/, '')
   const strategyMode = lambda < 0.2 ? 'Pure GTO' : lambda > 0.8 ? 'Max Exploit' : `Balanced GTO/Exploit (λ=${lambda.toFixed(2)})`
-  const manualNote = manualCards?.length ? `\nHero's cards are confirmed as: ${manualCards.join(' ')} (user-provided override).` : ''
+  const manualNote = manualCards?.length
+    ? `\nHero's hole cards are CONFIRMED as: ${manualCards.join(' ')} (user override — do NOT read cards from screenshot).`
+    : ''
+  const historyNote = actionHistory?.length
+    ? `\nKnown action history from previous streets:\n${actionHistory.join('\n')}`
+    : ''
 
-  const prompt = `You are an expert poker GTO coach with computer vision. Analyze this pokernow.com screenshot.${manualNote}
+  const prompt = `You are an expert poker GTO coach with computer vision. Analyze this pokernow.com screenshot carefully.${manualNote}${historyNote}
 
-Read DIRECTLY from the screenshot:
-- Hero's hole cards: the 2 face-up cards at the bottom of the table belonging to the player with action buttons (CALL/BET/FOLD/CHECK/RAISE visible), OR the bottom-center player
-- Community cards: cards dealt face-up in the CENTER of the table
-- Street: PREFLOP (no community cards), FLOP (3 cards), TURN (4 cards), RIVER (5 cards)
-- Pot: the number shown in the center of the table
-- Hero stack: the number shown under the hero's name/seat
-- Hero position: look for D or dealer chip (=BTN), SB/BB text near players, or infer from seat
-- To call: the number on the CALL button if visible (0 if check is available instead)
-- Is it hero's turn: action buttons (CALL/BET/FOLD/CHECK/RAISE) visible and active
+━━ STEP 1: READ THE SCREENSHOT ━━
+
+COMMUNITY CARDS (board) — count face-up cards in the CENTER HORIZONTAL ROW only:
+- Do NOT count hole cards at player seats
+- Do NOT count the deck or burn cards
+- 0 face-up center cards = PREFLOP
+- EXACTLY 3 face-up center cards = FLOP
+- EXACTLY 4 face-up center cards = TURN
+- EXACTLY 5 face-up center cards = RIVER
+
+HERO IDENTIFICATION — the hero is the player with action buttons at the bottom:
+- Look for buttons labeled CALL, FOLD, CHECK, BET, RAISE at the bottom of the screen
+- "YOUR TURN" text or highlighted action area also indicates it's hero's turn
+- Hero's hole cards are the 2 face-up cards in front of that player's seat
+- If no action buttons are visible or they appear greyed out → is_hero_turn = false
+
+OPPONENT BETS — look for:
+- Yellow/gold highlighted chip amounts near opponent seats
+- Numbers shown in front of an opponent's position
+- The CALL button label shows exactly how much the hero must call (to_call_bb)
+- If CALL button is visible with a number: to_call_bb = that number, action cannot be CHECK
+- If only CHECK button is visible: to_call_bb = 0
+
+POT: number shown in the center of the table
+STACKS: numbers shown under each player's name
+POSITION: look for D chip (=BTN), SB/BB labels near players
+
+━━ STEP 2: RECOMMEND ACTION ━━
 
 Strategy: ${strategyMode}
 
-If no cards are visible or it's between hands, set is_active_hand: false.
+Consider the full hand context including previous streets. If there was aggression on the flop and we're now on the turn, factor that in. If opponent bet/raised on a previous street, weight their range accordingly.
 
-Respond with ONLY raw JSON (no markdown, no code fences):
-{"is_active_hand":true,"is_hero_turn":true,"street":"PREFLOP","hero_cards":["Ah","Kd"],"board":[],"pot_bb":30,"stack_bb":960,"hero_position":"BTN","to_call_bb":20,"action":"RAISE","sizing":"2.5x","reasoning":"one sentence GTO reason","confidence":0.85,"gto_action":"RAISE 2.5x","exploit_action":"RAISE 2.5x"}`
+IMPORTANT: Never recommend CHECK if to_call_bb > 0. Never recommend FOLD if to_call_bb = 0.
+
+If no active hand is in progress, set is_active_hand: false.
+
+━━ RESPOND WITH ONLY RAW JSON (no markdown, no code fences) ━━
+{"is_active_hand":true,"is_hero_turn":true,"street":"FLOP","hero_cards":["Ts","9d"],"board":["Kd","Kc","8d"],"pot_bb":318,"stack_bb":652,"hero_position":"BB","to_call_bb":278,"action":"FOLD","sizing":null,"reasoning":"T9 has insufficient equity vs KK8 board facing a pot-sized bet","confidence":0.88,"gto_action":"FOLD","exploit_action":"FOLD"}`
 
   try {
     const resp = await client.messages.create({

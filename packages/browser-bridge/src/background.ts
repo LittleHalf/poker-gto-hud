@@ -161,7 +161,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'SCREENSHOT_TICK') {
-    if (tabId) handleScreenshotTick(message.lambda as number, message.manual_cards as string[]|undefined, tabId).catch(console.error)
+    if (tabId) handleScreenshotTick(message.lambda as number, message.manual_cards as string[]|undefined, message.action_history as string[]|undefined, tabId).catch(console.error)
     sendResponse({ ok: true })
     return true
   }
@@ -259,7 +259,7 @@ function sendAnalysisError(tabId: number, reason: string): void {
   })
 }
 
-async function handleScreenshotTick(lambda: number, manualCards: string[]|undefined, tabId: number): Promise<void> {
+async function handleScreenshotTick(lambda: number, manualCards: string[]|undefined, actionHistory: string[]|undefined, tabId: number): Promise<void> {
   const session = await getSession()
   const mcpUrl = session?.mcp_server_url ?? DEFAULT_MCP_URL
 
@@ -273,7 +273,7 @@ async function handleScreenshotTick(lambda: number, manualCards: string[]|undefi
     const resp = await fetch(`${mcpUrl}/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ screenshot, lambda, manual_cards: manualCards, session_id: session?.session_id }),
+      body: JSON.stringify({ screenshot, lambda, manual_cards: manualCards, action_history: actionHistory, session_id: session?.session_id }),
     })
     if (!resp.ok) {
       sendAnalysisError(tabId, `Server error ${resp.status} — redeploy from Manufact dashboard`)
