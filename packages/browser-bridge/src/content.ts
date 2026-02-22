@@ -232,7 +232,7 @@ function setHudStatus(msg: string): void {
 function setDetected(state: GameState | null): void {
   const el = document.getElementById('pgtohud-detected')
   if (!el) return
-  el.textContent = state ? `${state.hero_cards.join(' ')} | ${state.street} | pot ${state.pot_bb}bb` : ''
+  el.textContent = state ? `${state.hero_cards.join(' ')} | ${state.street} | pot ${state.pot_bb}bb | stack ${state.stack_bb}bb` : ''
 }
 
 function showDecision(d: Decision, lambda: number): void {
@@ -309,6 +309,53 @@ function parseStack(el: Element | null): number {
   return parseFloat(el?.textContent?.replace(/[^0-9.]/g, '') ?? '0') || 0
 }
 
+function readStack(heroEl: Element | null): number {
+  if (!heroEl) return 0
+
+  // 1. Try known class-name selectors
+  const selectors = [
+    '.table-player-stack',
+    '.stack-value',
+    '.player-stack',
+    '[class*="stack"]',
+    '[class*="chips"] [class*="value"]',
+    '[class*="chips"] [class*="main"]',
+    '[class*="balance"]',
+    '[class*="amount"]',
+  ]
+  for (const sel of selectors) {
+    const el = heroEl.querySelector(sel)
+    const val = parseStack(el)
+    if (val > 0) return val
+  }
+
+  // 2. Scan all leaf text nodes inside hero element for the largest plausible chip count
+  // pokernow.com often renders "PlayerName\n960" inside the seat element
+  const candidates: number[] = []
+  const walker = document.createTreeWalker(heroEl, NodeFilter.SHOW_TEXT)
+  let node: Text | null
+  while ((node = walker.nextNode() as Text)) {
+    const text = node.textContent?.trim() ?? ''
+    // Match standalone numbers (chip counts are typically 10–999999)
+    const match = text.match(/^(\d{2,7})$/)
+    if (match) {
+      const n = parseFloat(match[1])
+      if (n >= 10 && n <= 999999) candidates.push(n)
+    }
+  }
+  // Return the largest number found (stack > antes/blinds shown)
+  if (candidates.length > 0) return Math.max(...candidates)
+
+  // 3. Last resort: grab all text from the hero element and find the biggest number
+  const allText = heroEl.textContent ?? ''
+  const nums = [...allText.matchAll(/\b(\d{2,7})\b/g)]
+    .map(m => parseFloat(m[1]))
+    .filter(n => n >= 10 && n <= 999999)
+  if (nums.length > 0) return Math.max(...nums)
+
+  return 0
+}
+
 function findHeroEl(): Element | null {
   return document.querySelector('.table-player.main-player')
     ?? document.querySelector('.table-player[data-you="true"]')
@@ -368,9 +415,8 @@ function extractGameState(): GameState | null {
     if (btn) { to_call_bb = parseFloat(btn.textContent?.replace(/[^0-9.]/g, '') ?? '0') || 0; break }
   }
 
-  // Hero stack
-  const heroStackEl = heroEl?.querySelector('.table-player-stack,.stack-value,[class*="chips"] [class*="value"],[class*="stack"] [class*="value"]')
-  const stack_bb = parseStack(heroStackEl ?? null)
+  // Hero stack — try explicit selectors, then scan all numeric text in hero element
+  const stack_bb = readStack(heroEl)
 
   // Position — try data attribute, then text label, then seat-index estimate
   let hero_position = 'BTN'  // default to BTN (most playable range) when unknown
@@ -399,11 +445,10 @@ function extractGameState(): GameState | null {
     const nameEl = seat.querySelector('.table-player-name,.username,[class*="player-name"],[class*="username"]')
     const name = nameEl?.textContent?.trim()
     if (!name) return
-    const stackEl = seat.querySelector('.table-player-stack,.stack-value,[class*="stack"] [class*="value"],[class*="chips"] [class*="value"]')
     villains.push({
       player_id: btoa(name).replace(/[+/=]/g, ''),
       position: seat.getAttribute('data-position')?.toUpperCase() ?? `SEAT_${idx}`,
-      stack_bb: parseStack(stackEl ?? null),
+      stack_bb: readStack(seat),
     })
   })
 
