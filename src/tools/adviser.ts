@@ -84,7 +84,19 @@ Respond with ONLY a raw JSON object — no markdown, no code fences:
       } as Anthropic.ImageBlockParam)
       userContent.push({
         type: 'text',
-        text: `This is a screenshot of the poker game. Use it to visually confirm the cards, board, and action buttons. Then: ${prompt}`,
+        text: `This is a LIVE screenshot of the poker game taken right now.
+
+IMPORTANT: Use the screenshot as the source of truth. Read directly from it:
+- Hero's hole cards (bottom of table, the player labeled "justin" or with action buttons)
+- Community cards on the board (center of table)
+- Current street (preflop=no board cards, flop=3 cards, turn=4, river=5)
+- Hero's stack size (number shown near hero's seat)
+- Hero's position (look for D/BTN chip, SB/BB labels near players)
+- Pot size (center of table)
+- Amount to call (shown on the CALL button if visible)
+
+The DOM-scraped values below are provided as hints but may be stale — trust the screenshot over them:
+${prompt}`,
       } as Anthropic.TextBlockParam)
     } else {
       userContent.push({ type: 'text', text: prompt } as Anthropic.TextBlockParam)

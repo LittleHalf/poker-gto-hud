@@ -407,6 +407,12 @@ function extractGameState(): GameState | null {
     })
   })
 
+  // Detect street change — reset gate so re-analysis fires on new street
+  const newStreet = street
+  if (currentGameState && currentGameState.street !== newStreet) {
+    lastDecisionState = ''
+  }
+
   // Action history from game log
   const action_history: string[] = []
   for (const sel of ['.log-entry','.game-log-entry','[class*="log-entry"]','.timeline-entry']) {
@@ -508,28 +514,39 @@ function triggerDecision(): void {
 
 // ── DOM observer ─────────────────────────────────────────────────────────────
 
-const actionBarSeen = new WeakSet<Element>()
 const ACTION_SELECTORS = [
   '.action-buttons','.player-actions-wrap','.game-table-action-buttons',
   '.game-player-actions-container','[class*="action-buttons"]','[class*="actions-wrap"]',
 ]
 
-const observer = new MutationObserver(() => {
-  scanActionLog()
-
-  // Action bar visible → hero's turn
+function isActionBarVisible(): boolean {
   for (const sel of ACTION_SELECTORS) {
     const bar = document.querySelector(sel)
-    if (bar && !actionBarSeen.has(bar)) {
-      const s = getComputedStyle(bar as HTMLElement)
-      if ((bar as HTMLElement).offsetParent !== null && s.display !== 'none' && s.visibility !== 'hidden') {
-        actionBarSeen.add(bar)
-        triggerDecision()
-        break
-      }
+    if (!bar) continue
+    const s = getComputedStyle(bar as HTMLElement)
+    if ((bar as HTMLElement).offsetParent !== null && s.display !== 'none' && s.visibility !== 'hidden') {
+      return true
     }
   }
+  return false
+}
+
+const observer = new MutationObserver(() => {
+  scanActionLog()
+  // Re-trigger whenever action bar is visible — triggerDecision uses lastDecisionState
+  // to deduplicate, so this is safe to call on every mutation
+  if (isActionBarVisible() && !isWaitingForDecision) {
+    triggerDecision()
+  }
 })
+
+// Periodic live refresh — catches cases the observer misses (e.g. street changes
+// where the action bar element updates in-place without being re-added to the DOM)
+setInterval(() => {
+  if (isActionBarVisible() && !isWaitingForDecision) {
+    triggerDecision()
+  }
+}, 2500)
 
 // ── Incoming messages ─────────────────────────────────────────────────────────
 
