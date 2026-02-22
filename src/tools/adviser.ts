@@ -53,27 +53,31 @@ export async function analyzeScreenshot(
     content.push(
       // Image 1 — board region
       { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: boardB64 } } as Anthropic.ImageBlockParam,
-      { type: 'text', text: `IMAGE 1 — BOARD AREA (upper-center of the table):
-This image contains ONLY the community card zone. Count every white rounded-rectangle card with a visible rank and suit symbol. These are the shared board cards.
-- 0 cards → PREFLOP
-- 3 cards → FLOP
-- 4 cards → TURN
-- 5 cards → RIVER
-Ignore any promotional banner text (e.g. "POKER NOW PLUS"). Ignore the pot number (plain number with no card background). List each card's rank and suit.` } as Anthropic.TextBlockParam,
+      { type: 'text', text: `IMAGE 1 — BOARD AREA (upper-center of table, extended down to include bet pills):
+Task 1 — COUNT BOARD CARDS: Count white rounded-rectangle cards with visible rank+suit in the center horizontal row.
+- 0 cards → PREFLOP | 3 cards → FLOP | 4 cards → TURN | 5 cards → RIVER
+- Ignore pot number (plain number at top, no card background), ignore "POKER NOW PLUS" banner text
+
+Task 2 — OPPONENT BET: Look for a YELLOW-GREEN rounded pill/oval shape with a number inside it.
+- It appears to the LEFT or RIGHT of the board cards, near an opponent's seat position
+- The number inside is the amount the opponent has bet (this becomes to_call_bb)
+- If you see such a pill with a number (e.g. "75"), record that as the opponent bet amount` } as Anthropic.TextBlockParam,
 
       // Image 2 — hero cards
       { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: heroB64 } } as Anthropic.ImageBlockParam,
-      { type: 'text', text: `IMAGE 2 — HERO'S HOLE CARDS (bottom-center of the table):
-This image contains ONLY the hero's personal 2 hole cards. They are face-up with white rounded-rectangle backgrounds. Read both cards' rank and suit.${manualNote ? `\nOVERRIDE: ${manualNote}` : ''}` } as Anthropic.TextBlockParam,
+      { type: 'text', text: `IMAGE 2 — HERO SEAT AREA (bottom-center of the table):
+Task 1 — HERO'S HOLE CARDS: The hero's 2 personal cards are face-up with white rounded-rectangle backgrounds near the bottom of this image. Read both cards' rank and suit.${manualNote ? `\nOVERRIDE: ${manualNote}` : ''}
+
+Task 2 — POSITION: Look for a white circular chip with a blue "D" on it anywhere in this image. Whoever has this chip at their seat is the BTN (dealer). The hero's seat is at the bottom of this image — if the D chip is here, hero is BTN. If D chip is not visible here, check the full screenshot.` } as Anthropic.TextBlockParam,
 
       // Image 3 — action area
       { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: actionB64 } } as Anthropic.ImageBlockParam,
-      { type: 'text', text: `IMAGE 3 — ACTION AREA (bottom of the screen):
-This image shows the hero's action buttons and bet information.
-- If a CALL button is visible with a number, that number is to_call_bb (hero must call that amount)
-- If only CHECK is visible, to_call_bb = 0
-- "YOUR TURN" or active action buttons → is_hero_turn = true
-- Greyed-out buttons or no buttons → is_hero_turn = false` } as Anthropic.TextBlockParam,
+      { type: 'text', text: `IMAGE 3 — ACTION AREA (bottom of the screen, action buttons):
+- If a CALL button is visible with a number (e.g. "CALL 75"), that number is to_call_bb. This takes priority over everything else. Never recommend CHECK when a CALL amount is shown.
+- If only CHECK button is visible (no CALL), to_call_bb = 0
+- Both CALL and CHECK may be visible — if CALL has a number, use that number as to_call_bb
+- "YOUR TURN" text visible OR active bright buttons → is_hero_turn = true
+- No buttons, or all buttons greyed out → is_hero_turn = false` } as Anthropic.TextBlockParam,
 
       // Image 4 — full screenshot for context (pot, stacks, position)
       { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } } as Anthropic.ImageBlockParam,
@@ -81,7 +85,7 @@ This image shows the hero's action buttons and bet information.
 Use this image ONLY for:
 - Pot size: plain number at the top-center of the table (NOT a card)
 - Hero's stack: number near the hero's seat at the bottom
-- Position: white circular chip with blue "D" = BTN; SB/BB text labels near other seats
+- Position: white circular chip with blue "D" = BTN. In PokerNow this chip sits directly above or beside a player's cards at their seat. SB/BB text labels appear near other seats.
 
 ━━ SYNTHESIZE ALL IMAGES AND RECOMMEND ACTION ━━${historyNote}
 

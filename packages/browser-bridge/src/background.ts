@@ -100,15 +100,15 @@ async function cropRegions(dataUrl: string): Promise<ScreenshotCrops | null> {
       return blobToDataUrl(b)
     }
 
-    // Board: full-width horizontal strip in upper-center of the table
-    //   x: 5-95%  y: 18-58%  (generous — captures all 5 river cards + pot label)
+    // Board: full-width strip — community cards + opponent bet pills beside the board
+    //   x: 5-95%  y: 18-68%  (extended down to y:68% to capture bet pills beside board)
     // Hero cards: center-bottom where hero's face-up cards always appear
-    //   x: 25-75%  y: 53-82%  (captures the hero seat area)
-    // Action: bottom strip with CALL/FOLD/CHECK buttons and bet pills
+    //   x: 20-80%  y: 52-82%  (wider to capture D chip and hero seat)
+    // Action: bottom strip with CALL/FOLD/CHECK buttons and bet amounts
     //   x: 0-100%  y: 78-100%
     const [board, heroCards, action] = await Promise.all([
-      crop(0.05, 0.18, 0.90, 0.40),
-      crop(0.25, 0.53, 0.50, 0.29),
+      crop(0.05, 0.18, 0.90, 0.50),
+      crop(0.20, 0.52, 0.60, 0.30),
       crop(0.00, 0.78, 1.00, 0.22),
     ])
 
