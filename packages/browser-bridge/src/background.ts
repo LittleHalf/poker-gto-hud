@@ -239,13 +239,25 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   }
 })
 
+function sendAnalysisError(tabId: number, reason: string): void {
+  chrome.tabs.sendMessage(tabId, {
+    type: 'ANALYSIS_RESULT',
+    result: {
+      is_active_hand: false, is_hero_turn: false,
+      street: 'PREFLOP', hero_cards: [], board: [],
+      pot_bb: 0, stack_bb: 0, hero_position: 'UNKNOWN', to_call_bb: 0,
+      action: 'WAIT', reasoning: reason, confidence: 0,
+    },
+  })
+}
+
 async function handleScreenshotTick(lambda: number, manualCards: string[]|undefined, tabId: number): Promise<void> {
   const session = await getSession()
   const mcpUrl = session?.mcp_server_url ?? DEFAULT_MCP_URL
 
   const screenshot = await captureScreenshot(tabId)
   if (!screenshot) {
-    chrome.tabs.sendMessage(tabId, { type: 'ANALYSIS_RESULT', result: { is_active_hand: false, is_hero_turn: false, street: 'PREFLOP', hero_cards: [], board: [], pot_bb: 0, stack_bb: 0, hero_position: 'UNKNOWN', to_call_bb: 0, action: 'WAIT', reasoning: 'Could not capture screenshot', confidence: 0 } })
+    sendAnalysisError(tabId, 'Screenshot capture failed — ensure pokernow.com tab is visible')
     return
   }
 
@@ -255,10 +267,15 @@ async function handleScreenshotTick(lambda: number, manualCards: string[]|undefi
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ screenshot, lambda, manual_cards: manualCards, session_id: session?.session_id }),
     })
-    if (!resp.ok) { console.error('[BG] analyze failed', resp.status); return }
+    if (!resp.ok) {
+      sendAnalysisError(tabId, `Server error ${resp.status} — redeploy from Manufact dashboard`)
+      console.error('[BG] analyze failed', resp.status)
+      return
+    }
     const result = await resp.json()
     chrome.tabs.sendMessage(tabId, { type: 'ANALYSIS_RESULT', result })
   } catch (err) {
+    sendAnalysisError(tabId, `Cannot reach server — check Manufact deployment`)
     console.error('[BG] analyze error:', err)
   }
 }

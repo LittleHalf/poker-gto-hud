@@ -265,7 +265,15 @@ function showAnalysis(result: AnalysisResult): void {
   ;(document.getElementById('pgtohud-analyze') as HTMLButtonElement).disabled = false
 
   if (!result.is_active_hand) {
-    setStatus('Waiting for hand...')
+    // Show server error if present, otherwise just waiting
+    const isError = result.reasoning?.startsWith('Server error') || result.reasoning?.startsWith('Cannot reach') || result.reasoning?.startsWith('Screenshot') || result.reasoning?.startsWith('Claude Vision error')
+    if (isError) {
+      setStatus(`⚠ ${result.reasoning}`)
+      setDot('idle')
+    } else {
+      setStatus('Waiting for hand...')
+      setDot('connected')
+    }
     const a = document.getElementById('pgtohud-action'); if (a) { a.textContent=''; a.style.color='#22c55e' }
     const r = document.getElementById('pgtohud-reasoning'); if (r) r.textContent=''
     document.getElementById('pgtohud-detected')!.textContent = ''
@@ -318,6 +326,15 @@ function requestAnalysis(): void {
   setDot('thinking')
   setStatus('Analyzing...')
   ;(document.getElementById('pgtohud-analyze') as HTMLButtonElement).disabled = true
+
+  // Safety: always unlock after 10s so the timer never gets permanently stuck
+  setTimeout(() => {
+    if (isAnalyzing) {
+      isAnalyzing = false
+      setDot('connected')
+      ;(document.getElementById('pgtohud-analyze') as HTMLButtonElement).disabled = false
+    }
+  }, 10000)
 
   chrome.runtime.sendMessage({
     type: 'SCREENSHOT_TICK',
