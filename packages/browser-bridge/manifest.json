@@ -10,10 +10,7 @@
     "tabs"
   ],
   "host_permissions": [
-    "https://www.pokernow.com/*",
-    "https://pokernow.com/*",
-    "https://gentle-grass-l9c8r.run.mcp-use.com/*",
-    "http://localhost:*/*"
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js",

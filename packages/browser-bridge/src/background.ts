@@ -64,10 +64,18 @@ async function forwardEvent(event: GameEvent): Promise<void> {
 async function captureScreenshot(tabId: number): Promise<string | undefined> {
   try {
     const tab = await chrome.tabs.get(tabId)
-    if (!tab.windowId) return undefined
-    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 55 })
-    return dataUrl
-  } catch {
+    // Try with explicit windowId first, then fall back to current window
+    if (tab.windowId) {
+      try {
+        return await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 55 })
+      } catch (e1) {
+        console.warn('[BG] captureVisibleTab with windowId failed:', e1)
+      }
+    }
+    // Fallback: capture without specifying window (uses current focused window)
+    return await chrome.tabs.captureVisibleTab({ format: 'jpeg', quality: 55 })
+  } catch (err) {
+    console.error('[BG] captureScreenshot failed:', err)
     return undefined
   }
 }

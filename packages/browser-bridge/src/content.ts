@@ -325,6 +325,7 @@ function requestAnalysis(): void {
   isAnalyzing = true
   setDot('thinking')
   setStatus('Analyzing...')
+  console.log('[GTO HUD] Sending SCREENSHOT_TICK, lambda=', currentLambda, 'manualCards=', manualCards)
   ;(document.getElementById('pgtohud-analyze') as HTMLButtonElement).disabled = true
 
   // Safety: always unlock after 10s so the timer never gets permanently stuck
@@ -383,6 +384,7 @@ function scanActionLog(): void {
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message.type === 'ANALYSIS_RESULT') {
+    console.log('[GTO HUD] ANALYSIS_RESULT received:', message.result)
     showAnalysis(message.result as AnalysisResult)
   }
   if (message.type === 'VILLAIN_PROFILE') {
