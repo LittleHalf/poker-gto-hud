@@ -229,9 +229,9 @@ server.app.post('/chat', async (c) => {
 })
 
 server.app.post('/analyze', async (c) => {
-  const { screenshot, lambda = 0.5, manual_cards, action_history } =
-    await c.req.json<{ screenshot: string; lambda?: number; manual_cards?: string[]; action_history?: string[] }>()
-  const result = await analyzeScreenshot(screenshot, lambda, manual_cards, action_history)
+  const { screenshot, lambda = 0.5, manual_cards, action_history, board_crop, hero_crop, action_crop } =
+    await c.req.json<{ screenshot: string; lambda?: number; manual_cards?: string[]; action_history?: string[]; board_crop?: string; hero_crop?: string; action_crop?: string }>()
+  const result = await analyzeScreenshot(screenshot, lambda, manual_cards, action_history, board_crop, hero_crop, action_crop)
   return c.json(JSON.parse(JSON.stringify(result)))
 })
 

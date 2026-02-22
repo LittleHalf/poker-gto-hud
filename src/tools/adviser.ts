@@ -26,90 +26,97 @@ export async function analyzeScreenshot(
   screenshot: string,
   lambda: number,
   manualCards?: string[],
-  actionHistory?: string[]
+  actionHistory?: string[],
+  boardCrop?: string,
+  heroCrop?: string,
+  actionCrop?: string,
 ): Promise<ScreenshotAnalysis> {
   const base64 = screenshot.replace(/^data:image\/\w+;base64,/, '')
   const strategyMode = lambda < 0.2 ? 'Pure GTO' : lambda > 0.8 ? 'Max Exploit' : `Balanced GTO/Exploit (λ=${lambda.toFixed(2)})`
   const manualNote = manualCards?.length
-    ? `\nHero's hole cards are CONFIRMED as: ${manualCards.join(' ')} (user override — do NOT read cards from screenshot).`
+    ? `\nHero's hole cards are CONFIRMED as: ${manualCards.join(' ')} (user override — ignore hole cards in all images).`
     : ''
   const historyNote = actionHistory?.length
     ? `\nKnown action history from previous streets:\n${actionHistory.join('\n')}`
     : ''
 
-  const prompt = `You are an expert poker GTO coach with computer vision. Analyze this pokernow.com screenshot carefully.${manualNote}${historyNote}
+  // ── Build the content blocks ────────────────────────────────────────────────
+  // When crops are available we send 3 focused images with clear labels so
+  // Claude never confuses the board region with the hero-cards region.
+  const content: Anthropic.ContentBlockParam[] = []
 
-━━ STEP 1: READ THE SCREENSHOT ━━
+  if (boardCrop && heroCrop && actionCrop) {
+    const boardB64  = boardCrop.replace(/^data:image\/\w+;base64,/, '')
+    const heroB64   = heroCrop.replace(/^data:image\/\w+;base64,/, '')
+    const actionB64 = actionCrop.replace(/^data:image\/\w+;base64,/, '')
 
-HERO'S HOLE CARDS — located at the BOTTOM of the screen near the hero's seat:
-- These are YOUR 2 personal cards, fixed for the entire hand
-- They sit at the bottom-left or bottom-center near the hero's chip stack and name
-- They do NOT change when community cards are revealed on the board
-- Do NOT count these toward the board card total
-- If manual cards are provided above, use those instead and skip reading from the screenshot
+    content.push(
+      // Image 1 — board region
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: boardB64 } } as Anthropic.ImageBlockParam,
+      { type: 'text', text: `IMAGE 1 — BOARD AREA (upper-center of the table):
+This image contains ONLY the community card zone. Count every white rounded-rectangle card with a visible rank and suit symbol. These are the shared board cards.
+- 0 cards → PREFLOP
+- 3 cards → FLOP
+- 4 cards → TURN
+- 5 cards → RIVER
+Ignore any promotional banner text (e.g. "POKER NOW PLUS"). Ignore the pot number (plain number with no card background). List each card's rank and suit.` } as Anthropic.TextBlockParam,
 
-COMMUNITY CARDS (board) — a horizontal row of cards in the UPPER-CENTER of the green felt:
-- Each community card looks like this: WHITE ROUNDED-RECTANGLE background, large rank character (A K Q J 10 9 8 7 6 5 4 3 2) printed at the top, large suit symbol (♠ ♥ ♦ ♣) printed in the center/bottom
-- They are evenly spaced in a single horizontal line across the middle of the table
-- They are clearly distinct from the green felt due to their white backgrounds
-- Do NOT count the hero's 2 hole cards at the bottom of the screen — those are personal cards
-- Do NOT count face-down cards (solid colored backs with no rank/suit visible)
-- Do NOT count the pot number — it is a plain number above the board with no card background
-- A "POKER NOW PLUS" or similar promotional banner may appear overlapping this row — ignore all banner text and count only the white-background card elements
-- Count ONLY the white-background face-up cards in that center horizontal row:
-  - 0 cards = PREFLOP
-  - 3 cards = FLOP
-  - 4 cards = TURN
-  - 5 cards = RIVER
+      // Image 2 — hero cards
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: heroB64 } } as Anthropic.ImageBlockParam,
+      { type: 'text', text: `IMAGE 2 — HERO'S HOLE CARDS (bottom-center of the table):
+This image contains ONLY the hero's personal 2 hole cards. They are face-up with white rounded-rectangle backgrounds. Read both cards' rank and suit.${manualNote ? `\nOVERRIDE: ${manualNote}` : ''}` } as Anthropic.TextBlockParam,
 
-HERO IDENTIFICATION — the hero is the player with action buttons at the bottom:
-- Look for buttons labeled CALL, FOLD, CHECK, BET, RAISE at the bottom of the screen
-- "YOUR TURN" text or highlighted action area also indicates it's hero's turn
-- If no action buttons are visible or they appear greyed out → is_hero_turn = false
+      // Image 3 — action area
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: actionB64 } } as Anthropic.ImageBlockParam,
+      { type: 'text', text: `IMAGE 3 — ACTION AREA (bottom of the screen):
+This image shows the hero's action buttons and bet information.
+- If a CALL button is visible with a number, that number is to_call_bb (hero must call that amount)
+- If only CHECK is visible, to_call_bb = 0
+- "YOUR TURN" or active action buttons → is_hero_turn = true
+- Greyed-out buttons or no buttons → is_hero_turn = false` } as Anthropic.TextBlockParam,
 
-OPPONENT BETS — in PokerNow, bets appear as a YELLOW-GREEN rounded pill/oval shape with the bet amount number inside it, placed near the betting player's seat:
-- The CALL button at the bottom shows the exact amount hero must call → use that as to_call_bb
-- If CALL button is visible with a number: to_call_bb = that number, action cannot be CHECK
-- If only CHECK button is visible: to_call_bb = 0
+      // Image 4 — full screenshot for context (pot, stacks, position)
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } } as Anthropic.ImageBlockParam,
+      { type: 'text', text: `IMAGE 4 — FULL SCREENSHOT (for pot, stacks, and position):
+Use this image ONLY for:
+- Pot size: plain number at the top-center of the table (NOT a card)
+- Hero's stack: number near the hero's seat at the bottom
+- Position: white circular chip with blue "D" = BTN; SB/BB text labels near other seats
 
-POT: a plain number displayed at the TOP-CENTER of the table, above the board cards — this is the pot size in chips. It is NOT a card. Do NOT include it in the board or count it toward the street. It has no white card background.
-STACKS: numbers shown below each player's name — also NOT cards
-POSITION: look for a white circular chip with a blue "D" on it — that player is BTN. Players immediately to the left are SB then BB. Text labels "SB" and "BB" may also appear near those seats.
-
-IMPORTANT — HOW TO IDENTIFY A REAL CARD:
-A card in PokerNow has ALL of these properties:
-  1. White or cream rounded-rectangle background (clearly stands out from the green felt)
-  2. A large rank character at the top: A K Q J 10 9 8 7 6 5 4 3 2
-  3. A large suit symbol in the center or bottom: ♠ (black spade) ♥ (red heart) ♦ (red diamond) ♣ (black club)
-If something does not have all three of these, it is NOT a card. Specifically:
-- Numbers on the green felt without a white background = pot size or bet amount, NOT a card
-- Player names, stack sizes, chat text, banners, buttons = NOT cards
-- Face-down card backs (solid colored, no rank/suit) = NOT counted
-
-━━ STEP 2: RECOMMEND ACTION ━━
+━━ SYNTHESIZE ALL IMAGES AND RECOMMEND ACTION ━━${historyNote}
 
 Strategy: ${strategyMode}
-
-Consider the full hand context including previous streets. If there was aggression on the flop and we're now on the turn, factor that in. If opponent bet/raised on a previous street, weight their range accordingly.
-
-IMPORTANT: Never recommend CHECK if to_call_bb > 0. Never recommend FOLD if to_call_bb = 0.
-
+Consider full hand context. Factor in aggression from previous streets.
+Never recommend CHECK if to_call_bb > 0. Never recommend FOLD if to_call_bb = 0.
 If no active hand is in progress, set is_active_hand: false.
 
 ━━ RESPOND WITH ONLY RAW JSON (no markdown, no code fences) ━━
-{"is_active_hand":true,"is_hero_turn":true,"street":"FLOP","hero_cards":["Ts","9d"],"board":["Kd","Kc","8d"],"pot_bb":318,"stack_bb":652,"hero_position":"BB","to_call_bb":278,"action":"FOLD","sizing":null,"reasoning":"T9 has insufficient equity vs KK8 board facing a pot-sized bet","confidence":0.88,"gto_action":"FOLD","exploit_action":"FOLD"}`
+{"is_active_hand":true,"is_hero_turn":true,"street":"FLOP","hero_cards":["Ts","9d"],"board":["Kd","Kc","8d"],"pot_bb":318,"stack_bb":652,"hero_position":"BB","to_call_bb":278,"action":"FOLD","sizing":null,"reasoning":"T9 has insufficient equity vs KK8 board facing a pot-sized bet","confidence":0.88,"gto_action":"FOLD","exploit_action":"FOLD"}` } as Anthropic.TextBlockParam,
+    )
+  } else {
+    // Fallback: single full screenshot with full prompt
+    const prompt = `You are an expert poker GTO coach with computer vision. Analyze this pokernow.com screenshot.${manualNote}${historyNote}
+
+COMMUNITY CARDS: horizontal row in the upper-center of the green felt. Each card has a white rounded-rectangle background, large rank at top, large suit symbol centered. Count only those: 0=PREFLOP, 3=FLOP, 4=TURN, 5=RIVER. The pot number at the top-center is NOT a card.
+HERO CARDS: 2 face-up cards at the bottom of the screen near the hero's seat. Do NOT count toward board total.
+HERO TURN: active CALL/FOLD/CHECK/BET/RAISE buttons at bottom = is_hero_turn true. Greyed/absent = false.
+BETS: CALL button shows to_call_bb. Yellow-green pill shapes near seats show bet amounts.
+POT: plain number at top-center of table. STACKS: numbers under player names. POSITION: white circular D chip = BTN.
+Strategy: ${strategyMode}. Never CHECK if to_call_bb > 0. Never FOLD if to_call_bb = 0.
+If no active hand: is_active_hand: false.
+RESPOND WITH ONLY RAW JSON:
+{"is_active_hand":true,"is_hero_turn":true,"street":"FLOP","hero_cards":["Ts","9d"],"board":["Kd","Kc","8d"],"pot_bb":318,"stack_bb":652,"hero_position":"BB","to_call_bb":278,"action":"FOLD","sizing":null,"reasoning":"T9 has insufficient equity vs KK8 board","confidence":0.88,"gto_action":"FOLD","exploit_action":"FOLD"}`
+    content.push(
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } } as Anthropic.ImageBlockParam,
+      { type: 'text', text: prompt } as Anthropic.TextBlockParam,
+    )
+  }
 
   try {
     const resp = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 300,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } } as Anthropic.ImageBlockParam,
-          { type: 'text', text: prompt } as Anthropic.TextBlockParam,
-        ],
-      }],
+      max_tokens: 400,
+      messages: [{ role: 'user', content }],
     })
 
     const text = resp.content[0].type === 'text' ? resp.content[0].text.trim() : ''

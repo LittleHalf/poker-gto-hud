@@ -59,6 +59,66 @@ async function forwardEvent(event: GameEvent): Promise<void> {
   }
 }
 
+// ── Screenshot cropping ───────────────────────────────────────────────────────
+
+async function blobToDataUrl(blob: Blob): Promise<string> {
+  const buffer = await blob.arrayBuffer()
+  const bytes = new Uint8Array(buffer)
+  let binary = ''
+  const chunk = 8192
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
+  }
+  return `data:image/jpeg;base64,${btoa(binary)}`
+}
+
+interface ScreenshotCrops {
+  board: string      // upper-center strip — community cards only
+  heroCards: string  // bottom-center — hero's 2 hole cards
+  action: string     // bottom strip — action buttons + bet amounts
+}
+
+async function cropRegions(dataUrl: string): Promise<ScreenshotCrops | null> {
+  try {
+    const resp = await fetch(dataUrl)
+    const blob = await resp.blob()
+    const img = await createImageBitmap(blob)
+    const W = img.width
+    const H = img.height
+
+    console.log(`[BG] Screenshot dimensions: ${W}x${H}`)
+
+    const crop = async (xFrac: number, yFrac: number, wFrac: number, hFrac: number): Promise<string> => {
+      const x = Math.round(xFrac * W)
+      const y = Math.round(yFrac * H)
+      const w = Math.round(wFrac * W)
+      const h = Math.round(hFrac * H)
+      const canvas = new OffscreenCanvas(w, h)
+      const ctx = canvas.getContext('2d')!
+      ctx.drawImage(img, x, y, w, h, 0, 0, w, h)
+      const b = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 })
+      return blobToDataUrl(b)
+    }
+
+    // Board: full-width horizontal strip in upper-center of the table
+    //   x: 5-95%  y: 18-58%  (generous — captures all 5 river cards + pot label)
+    // Hero cards: center-bottom where hero's face-up cards always appear
+    //   x: 25-75%  y: 53-82%  (captures the hero seat area)
+    // Action: bottom strip with CALL/FOLD/CHECK buttons and bet pills
+    //   x: 0-100%  y: 78-100%
+    const [board, heroCards, action] = await Promise.all([
+      crop(0.05, 0.18, 0.90, 0.40),
+      crop(0.25, 0.53, 0.50, 0.29),
+      crop(0.00, 0.78, 1.00, 0.22),
+    ])
+
+    return { board, heroCards, action }
+  } catch (err) {
+    console.error('[BG] cropRegions failed:', err)
+    return null
+  }
+}
+
 // ── Decision request ─────────────────────────────────────────────────────────
 
 async function captureScreenshot(tabId: number): Promise<string | undefined> {
@@ -269,11 +329,32 @@ async function handleScreenshotTick(lambda: number, manualCards: string[]|undefi
     return
   }
 
+  // Crop into targeted regions so Claude gets focused views per area
+  const crops = await cropRegions(screenshot)
+  if (crops) {
+    console.log('[BG] Cropped board/heroCards/action regions successfully')
+  } else {
+    console.warn('[BG] Crop failed, sending full screenshot only')
+  }
+
   try {
+    const body: Record<string, unknown> = {
+      screenshot,
+      lambda,
+      manual_cards: manualCards,
+      action_history: actionHistory,
+      session_id: session?.session_id,
+    }
+    if (crops) {
+      body.board_crop   = crops.board
+      body.hero_crop    = crops.heroCards
+      body.action_crop  = crops.action
+    }
+
     const resp = await fetch(`${mcpUrl}/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ screenshot, lambda, manual_cards: manualCards, action_history: actionHistory, session_id: session?.session_id }),
+      body: JSON.stringify(body),
     })
     if (!resp.ok) {
       sendAnalysisError(tabId, `Server error ${resp.status} — redeploy from Manufact dashboard`)
