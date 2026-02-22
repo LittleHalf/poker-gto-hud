@@ -59,9 +59,10 @@ Task 1 — COUNT BOARD CARDS: Count white rounded-rectangle cards with visible r
 - Ignore pot number (plain number at top, no card background), ignore "POKER NOW PLUS" banner text
 
 Task 2 — OPPONENT BET: Look for a YELLOW-GREEN rounded pill/oval shape with a number inside it.
-- It appears to the LEFT or RIGHT of the board cards, near an opponent's seat position
-- The number inside is the amount the opponent has bet (this becomes to_call_bb)
-- If you see such a pill with a number (e.g. "75"), record that as the opponent bet amount` } as Anthropic.TextBlockParam,
+- It appears to the LEFT or RIGHT of the board cards, near an opponent's seat
+- The number inside is the opponent's bet amount (e.g. "75", "1020")
+- An opponent may also show "All In" text next to their name — if so, note their bet amount from the pill
+- Record the bet amount; the action area (Image 3) will confirm the exact to_call_bb from the CALL/ALL IN button` } as Anthropic.TextBlockParam,
 
       // Image 2 — hero cards
       { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: heroB64 } } as Anthropic.ImageBlockParam,
@@ -73,11 +74,18 @@ Task 2 — POSITION: Look for a white circular chip with a blue "D" on it anywhe
       // Image 3 — action area
       { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: actionB64 } } as Anthropic.ImageBlockParam,
       { type: 'text', text: `IMAGE 3 — ACTION AREA (bottom of the screen, action buttons):
-- If a CALL button is visible with a number (e.g. "CALL 75"), that number is to_call_bb. This takes priority over everything else. Never recommend CHECK when a CALL amount is shown.
-- If only CHECK button is visible (no CALL), to_call_bb = 0
-- Both CALL and CHECK may be visible — if CALL has a number, use that number as to_call_bb
-- "YOUR TURN" text visible OR active bright buttons → is_hero_turn = true
-- No buttons, or all buttons greyed out → is_hero_turn = false` } as Anthropic.TextBlockParam,
+DETERMINING to_call_bb — check for these button labels (in priority order):
+  1. "CALL [number]" (e.g. "CALL 75") → to_call_bb = that number
+  2. "ALL IN [number]" (e.g. "ALL IN 860") → to_call_bb = that number (hero calls by going all-in)
+  3. Only "CHECK" visible, no CALL or ALL IN → to_call_bb = 0
+  4. "BET" or "RAISE" only → to_call_bb = 0
+Never return to_call_bb = 0 if a CALL or ALL IN button shows a number.
+
+DETERMINING is_hero_turn:
+- "YOUR TURN" text visible → is_hero_turn = true
+- "EXTRA TIME ACTIVATED" text visible → is_hero_turn = true (hero is deciding with extra time)
+- Bright colored action buttons (green ALL IN/CALL, red FOLD) are active → is_hero_turn = true
+- No buttons visible, or buttons appear greyed/inactive → is_hero_turn = false` } as Anthropic.TextBlockParam,
 
       // Image 4 — full screenshot for context (pot, stacks, position)
       { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } } as Anthropic.ImageBlockParam,
