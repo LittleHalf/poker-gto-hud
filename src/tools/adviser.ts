@@ -41,18 +41,23 @@ export async function analyzeScreenshot(
 
 ━━ STEP 1: READ THE SCREENSHOT ━━
 
-COMMUNITY CARDS (board) — count face-up cards in the CENTER HORIZONTAL ROW only:
-- Do NOT count hole cards at player seats
-- Do NOT count the deck or burn cards
-- 0 face-up center cards = PREFLOP
-- EXACTLY 3 face-up center cards = FLOP
-- EXACTLY 4 face-up center cards = TURN
-- EXACTLY 5 face-up center cards = RIVER
+HERO'S HOLE CARDS — the 2 face-up cards at the BOTTOM CENTER of the screen:
+- These are YOUR cards, dealt at the start of the hand and fixed until a new hand begins
+- They do NOT change when community cards are revealed
+- Read these from the bottom-center card display area, NOT from the middle of the table
+- If manual cards are provided above, use those instead
+
+COMMUNITY CARDS (board) — cards in the MIDDLE OF THE TABLE (center horizontal row):
+- These are the shared cards revealed street by street — completely separate from hero's cards
+- Count only face-up cards in that center row:
+  - 0 cards in center = PREFLOP
+  - EXACTLY 3 cards in center = FLOP
+  - EXACTLY 4 cards in center = TURN
+  - EXACTLY 5 cards in center = RIVER
 
 HERO IDENTIFICATION — the hero is the player with action buttons at the bottom:
 - Look for buttons labeled CALL, FOLD, CHECK, BET, RAISE at the bottom of the screen
 - "YOUR TURN" text or highlighted action area also indicates it's hero's turn
-- Hero's hole cards are the 2 face-up cards in front of that player's seat
 - If no action buttons are visible or they appear greyed out → is_hero_turn = false
 
 OPPONENT BETS — look for:
